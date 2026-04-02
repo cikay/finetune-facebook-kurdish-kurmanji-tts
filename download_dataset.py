@@ -176,18 +176,11 @@ def main():
         text = scrape_article_text(slug)
         if not text:
             print(f"  ⚠️  No text found, trying without trailing parts...")
-            # Try shorter slug variants (remove last word progressively)
-            slug_parts = slug.split("-")
             found = False
-            for trim in range(1, min(4, len(slug_parts))):
-                short_slug = "-".join(slug_parts[:-trim])
-                if not short_slug:
-                    break
-                text = scrape_article_text(short_slug)
-                if text:
-                    slug = short_slug
-                    found = True
-                    break
+            text = scrape_article_text(slug)
+            if text:
+                found = True
+
             if not found:
                 print(f"  ❌ Skipping - no matching article found")
                 # Still keep the audio, but mark as no-text
