@@ -13,12 +13,12 @@ import os
 import re
 import json
 import time
-import unicodedata
 import subprocess
 from pathlib import Path
 
 import requests
 from bs4 import BeautifulSoup
+from slugify import slugify
 
 # ── Config ───────────────────────────────────────────────────────────────────
 PLAYLIST_URL = "https://youtube.com/playlist?list=PLpi8IQW8sLlOmmCgJA00ecGLHYMBcS5bu"
@@ -28,30 +28,6 @@ AUDIO_DIR = OUTPUT_DIR / "audio"
 TEXT_DIR = OUTPUT_DIR / "text"
 META_FILE = OUTPUT_DIR / "metadata.jsonl"
 SAMPLE_RATE = 16000  # 16kHz for TTS
-
-# Kurdish diacritic mappings
-KURDISH_CHAR_MAP = str.maketrans({
-    "ê": "e", "Ê": "e",
-    "û": "u", "Û": "u",
-    "î": "i", "Î": "i",
-    "ç": "c", "Ç": "c",
-    "ş": "s", "Ş": "s",
-    "ö": "o", "Ö": "o",
-    "ü": "u", "Ü": "u",
-    "ı": "i", "İ": "i",
-})
-
-
-def slugify(text: str) -> str:
-    """Slugify text: Kurdish-aware, lowercased, hyphenated."""
-    text = text.translate(KURDISH_CHAR_MAP)
-    text = unicodedata.normalize("NFKD", text)
-    text = text.encode("ascii", "ignore").decode("ascii")
-    text = text.lower().strip()
-    text = re.sub(r"[^\w\s-]", "", text)
-    text = re.sub(r"[-\s]+", "-", text)
-    text = text.strip("-")
-    return text
 
 
 def get_playlist_info() -> list[dict]:
