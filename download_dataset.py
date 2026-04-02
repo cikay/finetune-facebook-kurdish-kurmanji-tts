@@ -5,7 +5,7 @@ Download Kurdish Kurmanji TTS dataset:
 - Text from azadyawelat.com (matching articles via slugified video titles)
 
 Usage:
-    pip install yt-dlp requests beautifulsoup4
+    pip install pytubefix requests beautifulsoup4 python-slugify
     python download_dataset.py
 """
 
@@ -19,6 +19,7 @@ from pathlib import Path
 import requests
 from bs4 import BeautifulSoup
 from slugify import slugify
+from pytubefix import Playlist, YouTube
 
 # ── Config ───────────────────────────────────────────────────────────────────
 PLAYLIST_URL = "https://youtube.com/playlist?list=PLpi8IQW8sLlOmmCgJA00ecGLHYMBcS5bu"
@@ -31,37 +32,22 @@ SAMPLE_RATE = 16000  # 16kHz for TTS
 
 
 def get_playlist_info() -> list[dict]:
-    """Fetch video metadata from the YouTube playlist using yt-dlp."""
+    """Fetch video metadata from the YouTube playlist using pytubefix."""
     print("📥 Fetching playlist metadata...")
-    result = subprocess.run(
-        [
-            "yt-dlp",
-            "--flat-playlist",
-            "--dump-json",
-            "--no-warnings",
-            PLAYLIST_URL,
-        ],
-        capture_output=True,
-        text=True,
-    )
-
-    if result.returncode != 0:
-        print(f"❌ yt-dlp error: {result.stderr}")
+    try:
+        pl = Playlist(PLAYLIST_URL)
+        videos = []
+        for video in pl.videos:
+            videos.append({
+                "id": video.video_id,
+                "title": video.title,
+                "url": video.watch_url,
+            })
+        print(f"✅ Found {len(videos)} videos in playlist")
+        return videos
+    except Exception as e:
+        print(f"❌ Playlist fetch error: {e}")
         return []
-
-    videos = []
-    for line in result.stdout.strip().split("\n"):
-        if not line:
-            continue
-        data = json.loads(line)
-        videos.append({
-            "id": data.get("id"),
-            "title": data.get("title"),
-            "url": data.get("url") or f"https://www.youtube.com/watch?v={data['id']}",
-        })
-
-    print(f"✅ Found {len(videos)} videos in playlist")
-    return videos
 
 
 def download_audio(video: dict, output_path: Path) -> bool:
@@ -70,29 +56,33 @@ def download_audio(video: dict, output_path: Path) -> bool:
         print(f"  ⏭️  Audio already exists: {output_path.name}")
         return True
 
-    video_url = video["url"]
-    if not video_url.startswith("http"):
-        video_url = f"https://www.youtube.com/watch?v={video['id']}"
+    try:
+        yt = YouTube(video["url"])
+        stream = yt.streams.get_audio_only()
+        if not stream:
+            print("  ❌ No audio stream available")
+            return False
 
-    result = subprocess.run(
-        [
-            "yt-dlp",
-            "-x",
-            "--audio-format", "wav",
-            "--postprocessor-args", f"-ar {SAMPLE_RATE} -ac 1",
-            "-o", str(output_path),
-            "--no-warnings",
-            video_url,
-        ],
-        capture_output=True,
-        text=True,
-    )
+        # Download to a temp file first
+        temp_path = output_path.with_suffix(".m4a")
+        stream.download(output_path=str(output_path.parent), filename=temp_path.name)
 
-    if result.returncode != 0:
-        print(f"  ❌ Audio download failed: {result.stderr[:200]}")
+        # Convert to WAV 16kHz mono using ffmpeg
+        result = subprocess.run(
+            ["ffmpeg", "-y", "-i", str(temp_path),
+             "-ar", str(SAMPLE_RATE), "-ac", "1", str(output_path)],
+            capture_output=True, text=True,
+        )
+        temp_path.unlink(missing_ok=True)
+
+        if result.returncode != 0:
+            print(f"  ❌ FFmpeg conversion failed: {result.stderr[:200]}")
+            return False
+
+        return True
+    except Exception as e:
+        print(f"  ❌ Audio download failed: {e}")
         return False
-
-    return True
 
 
 def scrape_article_text(slug: str) -> str | None:
