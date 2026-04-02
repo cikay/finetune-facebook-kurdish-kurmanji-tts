@@ -14,9 +14,10 @@ import time
 import subprocess
 from pathlib import Path
 
+import yt_dlp
 import trafilatura
 from slugify import slugify
-from pytubefix import Playlist, YouTube
+from pytubefix import Playlist
 
 # ── Config ───────────────────────────────────────────────────────────────────
 PLAYLIST_URL = "https://youtube.com/playlist?list=PLpi8IQW8sLlOmmCgJA00ecGLHYMBcS5bu"
@@ -56,39 +57,22 @@ def download_audio(video: dict, output_path: Path) -> bool:
         return True
 
     try:
-        yt = YouTube(video["url"], use_oauth=True, allow_oauth_cache=True)
-        stream = yt.streams.get_audio_only()
-        if not stream:
-            print("  ❌ No audio stream available")
-            return False
+        ydl_opts = {
+            "format": "bestaudio/best",
+            "outtmpl": str(output_path.with_suffix(".%(ext)s")),
+            "postprocessors": [{
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "wav",
+            }],
+            "postprocessor_args": ["-ar", str(SAMPLE_RATE), "-ac", "1"],
+            "quiet": True,
+            "no_warnings": True,
+        }
 
-        # Download to a temp file first
-        temp_path = output_path.with_suffix(".m4a")
-        stream.download(output_path=str(output_path.parent), filename=temp_path.name)
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([video["url"]])
 
-        # Convert to WAV 16kHz mono using ffmpeg
-        result = subprocess.run(
-            [
-                "ffmpeg",
-                "-y",
-                "-i",
-                str(temp_path),
-                "-ar",
-                str(SAMPLE_RATE),
-                "-ac",
-                "1",
-                str(output_path),
-            ],
-            capture_output=True,
-            text=True,
-        )
-        temp_path.unlink(missing_ok=True)
-
-        if result.returncode != 0:
-            print(f"  ❌ FFmpeg conversion failed: {result.stderr[:200]}")
-            return False
-
-        return True
+        return output_path.exists()
     except Exception as e:
         print(f"  ❌ Audio download failed: {e}")
         return False
