@@ -32,7 +32,7 @@ def get_playlist_info() -> list[dict]:
     """Fetch video metadata from the YouTube playlist using pytubefix."""
     print("📥 Fetching playlist metadata...")
     try:
-        pl = Playlist(PLAYLIST_URL)
+        pl = Playlist(PLAYLIST_URL, use_oauth=True, allow_oauth_cache=True)
         videos = []
         for video in pl.videos:
             videos.append(
@@ -56,7 +56,7 @@ def download_audio(video: dict, output_path: Path) -> bool:
         return True
 
     try:
-        yt = YouTube(video["url"])
+        yt = YouTube(video["url"], use_oauth=True, allow_oauth_cache=True)
         stream = yt.streams.get_audio_only()
         if not stream:
             print("  ❌ No audio stream available")
