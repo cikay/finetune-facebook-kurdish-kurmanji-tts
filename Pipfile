@@ -4,7 +4,6 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
-yt-dlp = "2026.3.17"
 requests = "2.33.1"
 beautifulsoup4 = "4.14.3"
 python-slugify = "==8.0.4"
