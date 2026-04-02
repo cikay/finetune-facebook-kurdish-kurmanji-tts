@@ -5,19 +5,16 @@ Download Kurdish Kurmanji TTS dataset:
 - Text from azadyawelat.com (matching articles via slugified video titles)
 
 Usage:
-    pip install pytubefix requests beautifulsoup4 python-slugify
+    pip install pytubefix trafilatura python-slugify
     python download_dataset.py
 """
 
-import os
-import re
 import json
 import time
 import subprocess
 from pathlib import Path
 
-import requests
-from bs4 import BeautifulSoup
+import trafilatura
 from slugify import slugify
 from pytubefix import Playlist, YouTube
 
@@ -38,11 +35,13 @@ def get_playlist_info() -> list[dict]:
         pl = Playlist(PLAYLIST_URL)
         videos = []
         for video in pl.videos:
-            videos.append({
-                "id": video.video_id,
-                "title": video.title,
-                "url": video.watch_url,
-            })
+            videos.append(
+                {
+                    "id": video.video_id,
+                    "title": video.title,
+                    "url": video.watch_url,
+                }
+            )
         print(f"✅ Found {len(videos)} videos in playlist")
         return videos
     except Exception as e:
@@ -69,9 +68,19 @@ def download_audio(video: dict, output_path: Path) -> bool:
 
         # Convert to WAV 16kHz mono using ffmpeg
         result = subprocess.run(
-            ["ffmpeg", "-y", "-i", str(temp_path),
-             "-ar", str(SAMPLE_RATE), "-ac", "1", str(output_path)],
-            capture_output=True, text=True,
+            [
+                "ffmpeg",
+                "-y",
+                "-i",
+                str(temp_path),
+                "-ar",
+                str(SAMPLE_RATE),
+                "-ac",
+                "1",
+                str(output_path),
+            ],
+            capture_output=True,
+            text=True,
         )
         temp_path.unlink(missing_ok=True)
 
@@ -85,52 +94,48 @@ def download_audio(video: dict, output_path: Path) -> bool:
         return False
 
 
-def scrape_article_text(slug: str) -> str | None:
-    """Scrape article text from azadyawelat.com using the slug."""
+def scrape_article(slug: str) -> dict | None:
+    """Extract article title, author, and text from azadyawelat.com using trafilatura."""
     url = f"{BASE_URL}/{slug}/"
     try:
-        resp = requests.get(url, timeout=15, headers={
-            "User-Agent": "Mozilla/5.0 (compatible; Dataset-Builder/1.0)"
-        })
-        if resp.status_code != 200:
-            print(f"  ❌ Article not found (HTTP {resp.status_code}): {url}")
+        downloaded = trafilatura.fetch_url(url)
+        if not downloaded:
+            print(f"  ❌ Article not found: {url}")
             return None
 
-        soup = BeautifulSoup(resp.text, "html.parser")
-
-        # Try to get the main article content
-        # Look for common article content containers
-        article = (
-            soup.find("article")
-            or soup.find("div", class_=re.compile(r"entry-content|post-content|article-content|content"))
-            or soup.find("div", class_=re.compile(r"single-content|main-content"))
+        output_bytes = trafilatura.extract(
+            downloaded, favor_precision=True, output_format="json", with_metadata=True,
         )
+        if not output_bytes:
+            print(f"  ❌ No text extracted from: {url}")
+            return None
 
-        if article:
-            # Remove script/style/nav/footer/related posts elements
-            for tag in article.find_all(["script", "style", "nav", "footer", "aside"]):
-                tag.decompose()
-            # Remove "related news" section
-            for h2 in article.find_all(["h2", "h3"]):
-                if h2.text and "Nûçeyên Eleqedar" in h2.text:
-                    # Remove everything after related news heading
-                    for sibling in h2.find_next_siblings():
-                        sibling.decompose()
-                    h2.decompose()
-                    break
+        output = json.loads(output_bytes)
 
-            paragraphs = article.find_all("p")
-            text = "\n".join(p.get_text(strip=True) for p in paragraphs if p.get_text(strip=True))
-        else:
-            # Fallback: get all paragraph text from the page
-            paragraphs = soup.find_all("p")
-            text = "\n".join(p.get_text(strip=True) for p in paragraphs if p.get_text(strip=True))
+        if not output:
+            print(f"  ❌ No text extracted from: {url}")
+            return None
 
-        return text.strip() if text.strip() else None
+        return {
+            "title": output["title"],
+            "author": output["author"],
+            "text": output["text"],
+        }
 
-    except requests.RequestException as e:
+    except Exception as e:
         print(f"  ❌ Request failed for {url}: {e}")
         return None
+
+
+def build_full_text(article: dict) -> str:
+    """Build the full text matching audio reading order: title, author, text."""
+    parts = []
+    if article["title"]:
+        parts.append(article["title"])
+    if article["author"]:
+        parts.append(article["author"])
+    parts.append(article["text"])
+    return "\n".join(parts)
 
 
 def main():
@@ -173,37 +178,37 @@ def main():
             continue
 
         # Scrape article text
-        text = scrape_article_text(slug)
-        if not text:
-            print(f"  ⚠️  No text found, trying without trailing parts...")
-            found = False
-            text = scrape_article_text(slug)
-            if text:
-                found = True
+        article = scrape_article(slug)
+        if not article:
+            print(f"  ❌ Skipping - no matching article found")
+            fail_count += 1
+            continue
 
-            if not found:
-                print(f"  ❌ Skipping - no matching article found")
-                # Still keep the audio, but mark as no-text
-                fail_count += 1
-                continue
+        # Build full text: title + author + text (matches audio reading order)
+        full_text = build_full_text(article)
 
         # Save text
         text_filename = f"{video_id}.txt"
         text_path = TEXT_DIR / text_filename
         with open(text_path, "w", encoding="utf-8") as f:
-            f.write(text)
+            f.write(full_text)
 
-        print(f"  ✅ Audio: {audio_filename} | Text: {len(text)} chars")
+        print(f"  ✅ Audio: {audio_filename} | Text: {len(full_text)} chars")
+        print(f"     Title: {article['title']}")
+        print(f"     Author: {article['author']}")
 
-        metadata_entries.append({
-            "id": video_id,
-            "title": title,
-            "slug": slug,
-            "audio_file": f"audio/{audio_filename}",
-            "text_file": f"text/{text_filename}",
-            "text_length": len(text),
-            "article_url": f"{BASE_URL}/{slug}/",
-        })
+        metadata_entries.append(
+            {
+                "id": video_id,
+                "title": article["title"],
+                "author": article["author"],
+                "slug": slug,
+                "audio_file": f"audio/{audio_filename}",
+                "text_file": f"text/{text_filename}",
+                "text_length": len(full_text),
+                "article_url": f"{BASE_URL}/{slug}/",
+            }
+        )
         success_count += 1
 
         # Be polite to the server
