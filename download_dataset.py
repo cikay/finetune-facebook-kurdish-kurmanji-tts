@@ -80,9 +80,8 @@ def download_audio(video: dict, output_path: Path) -> bool:
         return False
 
 
-def scrape_article(slug: str) -> dict | None:
+def scrape_article(url: str) -> dict | None:
     """Extract article title, author, and text from azadyawelat.com using trafilatura."""
-    url = f"{BASE_URL}/{slug}/"
     try:
         downloaded = trafilatura.fetch_url(url)
         if not downloaded:
@@ -164,7 +163,8 @@ def main():
             continue
 
         # Scrape article text
-        article = scrape_article(slug)
+        article_url = f"{BASE_URL}/{slug}/"
+        article = scrape_article(article_url)
         if not article:
             print(f"  ❌ Skipping - no matching article found")
             fail_count += 1
@@ -192,7 +192,7 @@ def main():
                 "audio_file": f"audio/{audio_filename}",
                 "text_file": f"text/{text_filename}",
                 "text_length": len(full_text),
-                "article_url": f"{BASE_URL}/{slug}/",
+                "article_url": article_url,
             }
         )
         success_count += 1
