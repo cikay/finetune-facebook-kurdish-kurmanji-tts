@@ -17,7 +17,7 @@ from pathlib import Path
 import yt_dlp
 import trafilatura
 from slugify import slugify
-from pytubefix import Playlist
+from pytubefix import Playlist, YouTube
 
 # ── Config ───────────────────────────────────────────────────────────────────
 PLAYLIST_URL = "https://youtube.com/playlist?list=PLpi8IQW8sLlOmmCgJA00ecGLHYMBcS5bu"
@@ -51,32 +51,47 @@ def get_playlist_info() -> list[dict]:
         return []
 
 
-def download_audio(video: dict, output_path: Path) -> bool:
-    """Download audio from a YouTube video as WAV 16kHz mono."""
+def download_audio(video_url: str, video_id: str, output_path: Path) -> bool:
+    """Download audio using pytubefix and convert to WAV via FFmpeg."""
     if output_path.exists():
         print(f"  ⏭️  Audio already exists: {output_path.name}")
         return True
 
-    try:
-        ydl_opts = {
-            "format": "bestaudio/best",
-            "outtmpl": str(output_path.with_suffix(".%(ext)s")),
-            "postprocessors": [{
-                "key": "FFmpegExtractAudio",
-                "preferredcodec": "wav",
-            }],
-            "postprocessor_args": ["-ar", str(SAMPLE_RATE), "-ac", "1"],
-            "quiet": True,
-            "no_warnings": True,
-            **({"cookiefile": str(COOKIES_FILE)} if COOKIES_FILE.exists() else {}),
-        }
+    temp_mp4 = AUDIO_DIR / f"{video_id}.mp4"
 
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([video["url"]])
+    try:
+        # 1. Download highest quality audio stream
+        yt = YouTube(video_url, use_oauth=True, allow_oauth_cache=True)
+        audio_stream = yt.streams.get_audio_only()
+        audio_stream.download(output_path=str(AUDIO_DIR), filename=f"{video_id}.mp4")
+
+        # 2. Convert to WAV 16kHz Mono using FFmpeg directly
+        # This mirrors your -ar 16000 -ac 1 requirements
+        cmd = [
+            "ffmpeg",
+            "-y",
+            "-i",
+            str(temp_mp4),
+            "-ar",
+            str(SAMPLE_RATE),
+            "-ac",
+            "1",
+            str(output_path),
+        ]
+
+        subprocess.run(
+            cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True
+        )
+
+        # 3. Cleanup temp file
+        if temp_mp4.exists():
+            temp_mp4.unlink()
 
         return output_path.exists()
     except Exception as e:
-        print(f"  ❌ Audio download failed: {e}")
+        print(f"  ❌ Audio download/convert failed: {e}")
+        if temp_mp4.exists():
+            temp_mp4.unlink()
         return False
 
 
