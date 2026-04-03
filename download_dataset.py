@@ -27,6 +27,7 @@ AUDIO_DIR = OUTPUT_DIR / "audio"
 TEXT_DIR = OUTPUT_DIR / "text"
 META_FILE = OUTPUT_DIR / "metadata.jsonl"
 SAMPLE_RATE = 16000  # 16kHz for TTS
+COOKIES_FILE = Path("cookies.txt")
 
 
 def get_playlist_info() -> list[dict]:
@@ -67,8 +68,7 @@ def download_audio(video: dict, output_path: Path) -> bool:
             "postprocessor_args": ["-ar", str(SAMPLE_RATE), "-ac", "1"],
             "quiet": True,
             "no_warnings": True,
-            "username": "oauth2",
-            "password": "",
+            **({"cookiefile": str(COOKIES_FILE)} if COOKIES_FILE.exists() else {}),
         }
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
