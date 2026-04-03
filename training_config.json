@@ -1,0 +1,50 @@
+{
+  "project_name": "mms-tts-kmr-finetune",
+  "model_name_or_path": "./mms-tts-kmr-train",
+  "output_dir": "./checkpoints",
+  "hub_model_id": null,
+  "overwrite_output_dir": true,
+
+  "dataset_name": "./processed_dataset/hf_dataset",
+  "audio_column_name": "audio",
+  "text_column_name": "text",
+  "train_split_name": "train",
+  "eval_split_name": "test",
+
+  "max_duration_in_seconds": 15.0,
+  "min_duration_in_seconds": 2.0,
+  "max_tokens_length": 450,
+
+  "do_train": true,
+  "do_eval": true,
+  "num_train_epochs": 200,
+  "gradient_accumulation_steps": 2,
+  "per_device_train_batch_size": 16,
+  "per_device_eval_batch_size": 8,
+  "gradient_checkpointing": false,
+  "dataloader_num_workers": 4,
+
+  "learning_rate": 2e-4,
+  "lr_decay": 0.999875,
+  "do_step_schedule_per_epoch": true,
+  "warmup_steps": 0,
+
+  "weight_disc": 3.0,
+  "weight_gen": 1.0,
+  "weight_kl": 1.5,
+  "weight_mel": 35.0,
+  "weight_duration": 1.0,
+  "weight_fmaps": 1.0,
+
+  "fp16": true,
+  "logging_steps": 50,
+  "eval_strategy": "steps",
+  "eval_steps": 500,
+  "save_strategy": "steps",
+  "save_steps": 500,
+  "save_total_limit": 3,
+  "load_best_model_at_end": true,
+
+  "report_to": "tensorboard",
+  "seed": 42
+}
