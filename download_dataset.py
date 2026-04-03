@@ -67,6 +67,8 @@ def download_audio(video: dict, output_path: Path) -> bool:
             "postprocessor_args": ["-ar", str(SAMPLE_RATE), "-ac", "1"],
             "quiet": True,
             "no_warnings": True,
+            "username": "oauth2",
+            "password": "",
         }
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
