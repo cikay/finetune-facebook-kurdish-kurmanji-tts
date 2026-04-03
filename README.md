@@ -26,6 +26,7 @@ dataset/
 - Python 3.12+
 - `yt-dlp` (must be installed and available on your `PATH`)
 - `ffmpeg` (required by `yt-dlp` for audio conversion)
+- `fasttext` + the fastText language ID model for filtering non-Kurmanji articles
 
 ## Setup
 
@@ -39,6 +40,8 @@ Or install dependencies directly:
 ```bash
 pip install yt-dlp requests beautifulsoup4
 ```
+
+The script will auto-download the fastText language identification model on first run via `huggingface_hub`.
 
 ## Usage
 
