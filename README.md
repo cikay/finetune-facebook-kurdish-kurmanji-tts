@@ -1,32 +1,10 @@
-# Kurdish Kurmanji TTS Dataset Pipeline
+# Kurdish Kurmanji Voice Dataset Pipeline
 
-A script to build a paired audio-text dataset for Kurdish Kurmanji Text-to-Speech (TTS) fine-tuning.
+A pipeline to build a paired audio-text dataset for Kurdish Kurmanji, suitable for fine-tuning TTS and ASR models.
 
-It downloads news readings from a YouTube playlist and matches them with the corresponding article text scraped from [azadyawelat.com](https://azadyawelat.com).
+It downloads news readings from a YouTube playlist, matches them with article text scraped from [azadyawelat.com](https://azadyawelat.com), then segments long audio into short utterances using CTC forced alignment.
 
-## How It Works
-
-1. Fetches video metadata from a YouTube playlist using `yt-dlp`.
-2. Downloads each video's audio as a 16kHz mono WAV file.
-3. Derives a URL slug from the video title (with Kurdish diacritic normalization) and scrapes the matching article text from azadyawelat.com.
-4. Saves each audio/text pair and writes a `metadata.jsonl` index file.
-
-## Output Structure
-
-```
-dataset/
-├── audio/          # WAV files (16kHz, mono), named by YouTube video ID
-├── text/           # Plain text files, named by YouTube video ID
-├── metadata.jsonl  # One JSON object per pair (id, title, slug, file paths, etc.)
-└── playlist_info.json
-```
-
-## Requirements
-
-- Python 3.12+
-- `yt-dlp` (must be installed and available on your `PATH`)
-- `ffmpeg` (required by `yt-dlp` for audio conversion)
-- `fasttext` + the fastText language ID model for filtering non-Kurmanji articles
+**Published dataset:** [muzaffercky/azadiya-welat-kurdish-kurmanji-voice](https://huggingface.co/datasets/muzaffercky/azadiya-welat-kurdish-kurmanji-voice)
 
 ## Setup
 
@@ -35,37 +13,72 @@ pip install pipenv
 pipenv install
 ```
 
-Or install dependencies directly:
+
+## Pipeline
+
+### 1. Download
 
 ```bash
-pip install yt-dlp requests beautifulsoup4
-```
-
-The script will auto-download the fastText language identification model on first run via `huggingface_hub`.
-
-## Usage
-
-```bash
-pipenv run python download_dataset.py
-# or
 python download_dataset.py
 ```
 
-The dataset will be written to the `dataset/` directory in the current working directory.
+Fetches audio and text pairs from Azadiya Welat:
 
-## Configuration
+1. Fetches video metadata from a YouTube playlist using `yt-dlp`.
+2. Downloads each video's audio as a 16kHz mono WAV file.
+3. Derives a URL slug from the video title (with Kurdish diacritic normalization) and scrapes the matching article text from azadyawelat.com.
+4. Saves each audio/text pair and writes a `metadata.jsonl` index file.
 
-Edit the constants at the top of `download_dataset.py` to change the data source or output settings:
+### 2. Clean Audio
+
+```bash
+python clean_audio.py
+```
+
+Removes background music from audio files using [Demucs](https://github.com/adefossez/demucs) (Meta's source separation model):
+
+1. Runs Demucs vocal separation on all WAV files.
+2. Extracts the vocals (speech) track, discarding background music.
+3. Saves cleaned files to `dataset/clean_audio/` with matching filenames.
+
+### 3. Segmentation
+
+```bash
+python segmentation.py
+```
 
 | Variable | Default | Description |
 |---|---|---|
-| `PLAYLIST_URL` | YouTube playlist URL | Source playlist of news readings |
-| `BASE_URL` | `https://azadyawelat.com` | Website to scrape article text from |
-| `OUTPUT_DIR` | `dataset/` | Root output directory |
-| `SAMPLE_RATE` | `16000` | Audio sample rate in Hz |
+| `MIN_DURATION` | `2.0` | Minimum segment duration (seconds) |
+| `MAX_DURATION` | `15.0` | Maximum segment duration (seconds) |
+| `MIN_WORDS` | `3` | Minimum words per segment |
+| `MIN_SCORE` | `-7.0` | Minimum alignment confidence score |
 
-## Notes
 
-- If a full slug doesn't match an article, the script progressively trims the last word(s) of the slug and retries (up to 3 times).
-- A 1-second delay is added between article requests to be polite to the server.
-- Already-downloaded audio files are skipped on re-runs.
+Splits long audio (~5 min each) into short utterances using forced alignment:
+
+1. Loads the [MMS-300M forced alignment model](https://huggingface.co/MahmoudAshraf/mms-300m-1130-forced-aligner) (supports 1,130+ languages including Kurdish).
+2. Aligns ground truth text to audio using CTC forced alignment — no ASR transcription involved.
+3. Maps word-level timestamps back to sentence boundaries.
+4. Filters segments by duration (2–15s), word count (≥3), and alignment confidence.
+5. Saves segmented WAV files and `segments_metadata.jsonl`.
+
+### 4. Publish Dataset (`push_dataset.py`)
+```bash
+python push_dataset.py --repo your-username/your-dataset-name
+```
+
+Uploads the segmented dataset to HuggingFace Hub.
+
+## Output Structure
+
+```
+dataset/                        # Raw downloaded data
+├── audio/                      # WAV files (16kHz, mono)
+├── text/                       # Plain text files
+├── metadata.jsonl              # Audio/text path mappings
+└── playlist_info.json
+├── aligned/                   # Aligned and segmented data
+    ├── segments/                   # Short WAV utterances
+    └── segments_metadata.jsonl     # Segment metadata (audio, text, duration, score)
+```
