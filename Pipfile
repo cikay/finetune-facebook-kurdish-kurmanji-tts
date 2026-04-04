@@ -20,6 +20,7 @@ transformers = "*"
 soundfile = "*"
 torchcodec = "==0.11.0"
 ctc-forced-aligner = {git = "https://github.com/MahmoudAshraf97/ctc-forced-aligner.git"}
+python-dotenv = "*"
 
 [dev-packages]
 
