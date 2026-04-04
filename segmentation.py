@@ -34,11 +34,11 @@ from ctc_forced_aligner.alignment_utils import (
 
 # ── Config ───────────────────────────────────────────────────────────────────
 DATASET_DIR = Path("dataset")
-AUDIO_DIR = DATASET_DIR / "audio"
+AUDIO_DIR = DATASET_DIR / "clean_audio"
 TEXT_DIR = DATASET_DIR / "text"
 META_FILE = DATASET_DIR / "metadata.jsonl"
 OUTPUT_DIR = Path("ctc_processed_dataset")
-SEGMENTS_DIR = OUTPUT_DIR / "segments"
+SEGMENTS_DIR = DATASET_DIR / "segments"
 
 LANGUAGE = "kmr"  # ISO 639-3 for Kurmanji Kurdish
 SAMPLE_RATE = 16000
@@ -322,10 +322,8 @@ def main():
 
     # Determine device
     device = "cpu"
-    # if torch.cuda.is_available():
-    #     device = "cuda"
-    # elif torch.backends.mps.is_available():
-    #     device = "mps"
+    if torch.cuda.is_available():
+        device = "cuda"
 
     dtype = torch.float16 if device == "cuda" else torch.float32
 
@@ -396,7 +394,7 @@ def main():
     print(f"📊 Total duration: {total_dur / 3600:.1f}h | Avg: {avg_dur:.1f}s | Avg score: {avg_score:.2f}")
 
     # Save metadata JSONL
-    with open(OUTPUT_DIR / "segments_metadata.jsonl", "w", encoding="utf-8") as f:
+    with open(DATASET_DIR / "segments_metadata.jsonl", "w", encoding="utf-8") as f:
         for seg in all_segments:
             f.write(json.dumps(seg, ensure_ascii=False) + "\n")
 
