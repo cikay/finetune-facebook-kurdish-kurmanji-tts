@@ -35,10 +35,10 @@ from ctc_forced_aligner.alignment_utils import (
 
 # ── Config ───────────────────────────────────────────────────────────────────
 DATASET_DIR = Path("dataset")
-AUDIO_DIR = DATASET_DIR / "clean_audio"
+AUDIO_DIR = DATASET_DIR / "audio"
 TEXT_DIR = DATASET_DIR / "text"
 META_FILE = DATASET_DIR / "metadata.jsonl"
-OUTPUT_DIR = DATASET_DIR / "aligned"  # final output segments and metadata
+OUTPUT_DIR = Path("ctc_processed_dataset")
 SEGMENTS_DIR = OUTPUT_DIR / "segments"
 
 LANGUAGE = "kmr"  # ISO 639-3 for Kurmanji Kurdish
