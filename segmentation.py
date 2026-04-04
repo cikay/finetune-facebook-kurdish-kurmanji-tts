@@ -7,8 +7,7 @@ Unlike the Whisper-based approach, this aligns the *ground truth* text to the
 audio, producing accurate timestamps without ASR errors.
 
 Usage:
-    pipenv run python preprocess_align.py
-    pipenv run python preprocess_align.py
+   python segmentation.py
 """
 
 import json
