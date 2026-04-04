@@ -35,7 +35,7 @@ from ctc_forced_aligner.alignment_utils import (
 
 # ── Config ───────────────────────────────────────────────────────────────────
 DATASET_DIR = Path("dataset")
-AUDIO_DIR = DATASET_DIR / "audio"
+AUDIO_DIR = DATASET_DIR / "clean_audio"
 TEXT_DIR = DATASET_DIR / "text"
 META_FILE = DATASET_DIR / "metadata.jsonl"
 OUTPUT_DIR = DATASET_DIR / "aligned"  # final output segments and metadata
