@@ -325,6 +325,7 @@ def main():
     if torch.cuda.is_available():
         device = "cuda"
 
+    print(f"Using device: {device}")
     dtype = torch.float16 if device == "cuda" else torch.float32
 
     # Load metadata
