@@ -4,9 +4,13 @@ import shutil
 import sys
 from pathlib import Path
 
-import torch
 import torchaudio
 
+import torchaudio
+
+torchaudio.set_audio_backend("soundfile")
+
+import torch
 from demucs.pretrained import get_model
 from demucs.apply import apply_model
 
