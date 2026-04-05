@@ -20,7 +20,7 @@ from datasets import Audio, Dataset
 
 load_dotenv()
 
-METADATA_FILE = Path("ctc_processed_dataset/segments_metadata.jsonl")
+METADATA_FILE = Path("dataset/segments_metadata.jsonl")
 SAMPLE_RATE = 16000
 
 
