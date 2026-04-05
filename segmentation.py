@@ -31,6 +31,7 @@ from ctc_forced_aligner.alignment_utils import (
     forced_align,
     merge_repeats,
 )
+from klpt.tokenize import Tokenize
 
 # ── Config ───────────────────────────────────────────────────────────────────
 DATASET_DIR = Path("dataset")
@@ -54,9 +55,8 @@ MAX_DURATION = 15.0  # seconds
 MIN_WORDS = 3  # minimum words per segment
 MIN_SCORE = -7.0  # minimum average alignment score (log-prob; more negative = worse)
 
-# Sentence-ending punctuation for Kurdish text splitting
-SENT_END_RE = re.compile(r"(?<=[.!?])\s+")
 
+klpt_tokenizer = Tokenize("Kurmanji", "Latin")
 
 # ── Fixed alignment (star token index bug workaround) ────────────────────────
 
@@ -116,10 +116,8 @@ def clean_text(text: str) -> str:
 
 
 def split_into_sentences(text: str) -> list[str]:
-    """Split Kurdish text into sentences using punctuation boundaries."""
-    parts = SENT_END_RE.split(text)
-    sentences = [s.strip() for s in parts if s.strip()]
-    return sentences
+    """Split Kurdish text into sentences using KLPT."""
+    return klpt_tokenizer.sent_tokenize(text)
 
 
 # ── Core pipeline ────────────────────────────────────────────────────────────
@@ -166,6 +164,7 @@ def align_and_segment(
 
     # Split text into sentences for sentence-level alignment
     sentences = split_into_sentences(text)
+    print(f"    Text split into {len(sentences)} sentences")
     if not sentences:
         sentences = [text]
 
