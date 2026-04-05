@@ -6,9 +6,7 @@ from pathlib import Path
 
 import torchaudio
 
-import torchaudio
-
-torchaudio.set_audio_backend("soundfile")
+import soundfile as sf
 
 import torch
 from demucs.pretrained import get_model
@@ -39,7 +37,8 @@ def main():
     for wav_file in wav_files:
         print(f"🔄 Processing {wav_file.name}")
 
-        wav, sr = torchaudio.load(wav_file)
+        data, sr = sf.read(wav_file)
+        wav = torch.tensor(data.T, dtype=torch.float32)
 
         # Convert to stereo if needed (Demucs expects 2 channels)
         if wav.shape[0] == 1:
