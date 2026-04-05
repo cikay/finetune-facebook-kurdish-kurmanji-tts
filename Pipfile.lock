@@ -1,7 +1,7 @@
 {
     "_meta": {
         "hash": {
-            "sha256": "6d60aa2168639564b58c7dc74b7670e057a03a2d07ad612c52dd2f38938d9397"
+            "sha256": "2722b97c2040bdbc6c193c01f265aebe7f3a510edcad6da2461c836be99c23b8"
         },
         "pipfile-spec": 6,
         "requires": {
@@ -1317,21 +1317,6 @@
             "markers": "python_version >= '3.10'",
             "version": "==3.9.4"
         },
-        "nodejs-wheel-binaries": {
-            "hashes": [
-                "sha256:404b563467129e6a0ea7006a38b3d8af0ebfbc340b31a6a0af2c59ea3af90b7c",
-                "sha256:634f57829ebfdfe95d096f32a50c5cdd3a6c72a94dcf2b92a8bef9868cccb13e",
-                "sha256:7863c62f8a3946b727831f71375a9ae00205b3258478476034b49c3a1d57ac12",
-                "sha256:7a087b6a727fb9242d1cc83c8b121711bd0e9686408d27de48b34b23dfb26ac5",
-                "sha256:810a48ce096925ead0690f7d143e48fb902ebfc9212097e8f6cb3ac6cbe8f314",
-                "sha256:978fdfe76624c48111ab99ed0f99f9d4c1c682e420b0212ac9e1daee52f20283",
-                "sha256:a3f64daa1235fa6a83c778ded98d5fe4e74979ca54aa2ffb807f0805c57c3abe",
-                "sha256:d00ae0c86d7e1bfa798e8f8ad282db751af157cdcaa1208a1b9a2cf2a85ac821",
-                "sha256:d9e856ba0f2d3d2659869e6e0f4cae6874faeeeca7f879131a88451356373ac4"
-            ],
-            "markers": "python_version >= '3.7'",
-            "version": "==24.14.1"
-        },
         "numpy": {
             "hashes": [
                 "sha256:03a8c78d01d9781b28a6989f6fa1bb2c4f2d51201cf99d3dd875df6fbd96b23b",
@@ -1686,15 +1671,6 @@
             "index": "pypi",
             "markers": "python_version >= '3.7'",
             "version": "==8.0.4"
-        },
-        "pytubefix": {
-            "hashes": [
-                "sha256:0cf833077949418c39a0b559277edba140d8dcbafa49974bd2f3cbc8d8e0ab50",
-                "sha256:6a5bc786db22aecc266061d02229feb760763182d293c66d01a74b18ad4c089a"
-            ],
-            "index": "pypi",
-            "markers": "python_version >= '3.7'",
-            "version": "==10.3.8"
         },
         "pytz": {
             "hashes": [
