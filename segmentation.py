@@ -342,7 +342,8 @@ def main():
     # Process each audio file
     all_segments = []
     for idx, entry in enumerate(entries):
-        audio_path = AUDIO_DIR / entry["audio_file"]
+        _, audio_name = entry["audio_file"].split("/")
+        audio_path = AUDIO_DIR / audio_name
         text_path = DATASET_DIR / entry["text_file"]
         video_id = entry["id"]
 
