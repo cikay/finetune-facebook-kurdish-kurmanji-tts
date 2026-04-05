@@ -55,7 +55,7 @@ MIN_WORDS = 3  # minimum words per segment
 MIN_SCORE = -7.0  # minimum average alignment score (log-prob; more negative = worse)
 
 # Sentence-ending punctuation for Kurdish text splitting
-SENT_END_RE = re.compile(r"(?<=[.!?;])\s+")
+SENT_END_RE = re.compile(r"(?<=[.!?])\s+")
 
 
 # ── Fixed alignment (star token index bug workaround) ────────────────────────
