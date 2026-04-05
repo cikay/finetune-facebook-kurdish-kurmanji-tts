@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 
-import shutil
 import sys
 from pathlib import Path
 
+import soundfile as sf
+import numpy as np
+import torch
 import torchaudio
 
-import soundfile as sf
-
-import torch
 from demucs.pretrained import get_model
 from demucs.apply import apply_model
 
@@ -27,7 +26,6 @@ def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"🚀 Using device: {device}")
 
-    # Load model once
     model = get_model(name="htdemucs")
     model.to(device)
     model.eval()
@@ -38,28 +36,24 @@ def main():
         print(f"🔄 Processing {wav_file.name}")
 
         data, sr = sf.read(wav_file)
-        wav = torch.tensor(data.T, dtype=torch.float32)
-        print(f"Shape: {wav.shape}")
 
-        if wav.ndim == 1:
-            wav = wav.unsqueeze(0).repeat(2, 1)
-        elif wav.shape[0] == 1:
-            wav = wav.repeat(2, 1)
+        # data shape: (samples,) mono veya (samples, channels) stereo
+        if data.ndim == 1:
+            data = np.stack([data, data], axis=0)  # (2, samples)
+        else:
+            data = data.T  # (channels, samples)
+            if data.shape[0] == 1:
+                data = np.concatenate([data, data], axis=0)  # (2, samples)
 
-        # Convert to stereo if needed (Demucs expects 2 channels)
-        if wav.shape[0] == 1:
-            wav = wav.repeat(2, 1)
-
-        wav = wav.to(device)
+        wav = torch.tensor(data, dtype=torch.float32).to(device)
 
         with torch.no_grad():
             sources = apply_model(model, wav.unsqueeze(0), device=device)[0]
 
-        # Demucs order: [drums, bass, other, vocals]
-        vocals = sources[3].cpu()
+        vocals = sources[3].cpu().numpy().T  # (samples, 2)
 
         out_path = CLEAN_DIR / wav_file.name
-        torchaudio.save(out_path, vocals, sr)
+        sf.write(out_path, vocals, sr)
 
     print(f"\n✅ Done! Cleaned files in {CLEAN_DIR}")
 
