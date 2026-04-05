@@ -4,21 +4,23 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
-requests = "2.33.1"
-beautifulsoup4 = "4.14.3"
+requests = "==2.33.1"
+beautifulsoup4 = "==4.14.3"
 python-slugify = "==8.0.4"
-trafilatura = "2.0.0"
-yt-dlp = "2026.3.17"
+trafilatura = "==2.0.0"
+yt-dlp = "==2026.3.17"
 huggingface-hub = "==1.9.0"
 fasttext = "==0.9.3"
-numpy = "<2"
-datasets = "4.8.4"
-transformers = "5.5.0"
-soundfile = "0.13.1"
+numpy = "==1.26.4"
+datasets = "==4.8.4"
+transformers = "==5.5.0"
+soundfile = "==0.13.1"
+torch = "==2.9.1"
+torchaudio = "==2.9.1"
 ctc-forced-aligner = {git = "https://github.com/MahmoudAshraf97/ctc-forced-aligner.git"}
-python-dotenv = "1.2.2"
-demucs = "4.0.1"
-klpt = "*"
+python-dotenv = "==1.2.2"
+demucs = "==4.0.1"
+klpt = "==0.1.7"
 
 [dev-packages]
 
