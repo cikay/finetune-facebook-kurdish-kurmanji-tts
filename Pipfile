@@ -15,6 +15,7 @@ numpy = "<2"
 datasets = "4.8.4"
 transformers = "5.5.0"
 soundfile = "0.13.1"
+torchaudio = "==2.4.0"
 ctc-forced-aligner = {git = "https://github.com/MahmoudAshraf97/ctc-forced-aligner.git"}
 python-dotenv = "1.2.2"
 demucs = "4.0.1"
