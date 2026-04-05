@@ -10,7 +10,7 @@ It downloads news readings from a YouTube playlist, matches them with article te
 
 ```bash
 pip install pipenv
-pipenv install
+bash setup.sh
 ```
 
 
@@ -19,7 +19,8 @@ pipenv install
 ### 1. Download
 
 ```bash
-python download_dataset.py
+PIPENV_PIPFILE=Pipfile.linux pipenv run python download_dataset.py # for linux
+PIPENV_PIPFILE=Pipfile.mac pipenv run python download_dataset.py # for mac
 ```
 
 Fetches audio and text pairs from Azadiya Welat:
@@ -32,7 +33,8 @@ Fetches audio and text pairs from Azadiya Welat:
 ### 2. Clean Audio
 
 ```bash
-python clean_audio.py
+PIPENV_PIPFILE=Pipfile.linux pipenv run python clean_audio.py # for linux
+PIPENV_PIPFILE=Pipfile.mac pipenv run python clean_audio.py # for mac
 ```
 
 Removes background music from audio files using [Demucs](https://github.com/adefossez/demucs) (Meta's source separation model):
@@ -44,7 +46,8 @@ Removes background music from audio files using [Demucs](https://github.com/adef
 ### 3. Segmentation
 
 ```bash
-python segmentation.py
+PIPENV_PIPFILE=Pipfile.linux pipenv run python segmentation.py # for linux
+PIPENV_PIPFILE=Pipfile.mac pipenv run python segmentation.py # for mac
 ```
 
 | Variable | Default | Description |
@@ -65,7 +68,8 @@ Splits long audio (~5 min each) into short utterances using forced alignment:
 
 ### 4. Publish Dataset (`push_dataset.py`)
 ```bash
-python push_dataset.py --repo your-username/your-dataset-name
+PIPENV_PIPFILE=Pipfile.linux pipenv run python push_dataset.py --repo your-username/your-dataset-name # for linux
+PIPENV_PIPFILE=Pipfile.mac pipenv run python push_dataset.py --repo your-username/your-dataset-name # for mac
 ```
 
 Uploads the segmented dataset to HuggingFace Hub.
