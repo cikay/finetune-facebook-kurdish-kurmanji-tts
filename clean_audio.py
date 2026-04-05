@@ -39,6 +39,12 @@ def main():
 
         data, sr = sf.read(wav_file)
         wav = torch.tensor(data.T, dtype=torch.float32)
+        print(f"Shape: {wav.shape}")
+
+        if wav.ndim == 1:
+            wav = wav.unsqueeze(0).repeat(2, 1)
+        elif wav.shape[0] == 1:
+            wav = wav.repeat(2, 1)
 
         # Convert to stereo if needed (Demucs expects 2 channels)
         if wav.shape[0] == 1:
@@ -47,7 +53,7 @@ def main():
         wav = wav.to(device)
 
         with torch.no_grad():
-            sources = apply_model(model, wav[None], device=device)[0]
+            sources = apply_model(model, wav.unsqueeze(0), device=device)[0]
 
         # Demucs order: [drums, bass, other, vocals]
         vocals = sources[3].cpu()
