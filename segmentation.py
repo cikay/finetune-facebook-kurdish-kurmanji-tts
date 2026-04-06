@@ -7,9 +7,10 @@ Unlike the Whisper-based approach, this aligns the *ground truth* text to the
 audio, producing accurate timestamps without ASR errors.
 
 Usage:
-   python segmentation.py
+   python segmentation.py --audio-subdir clean_audio
 """
 
+import argparse
 import json
 import re
 import sys
@@ -131,6 +132,20 @@ def load_metadata() -> list[dict]:
             if line.strip():
                 entries.append(json.loads(line))
     return entries
+
+
+def parse_args() -> argparse.Namespace:
+    """Parse CLI arguments."""
+    parser = argparse.ArgumentParser(
+        description="Segment audio using CTC forced alignment."
+    )
+    parser.add_argument(
+        "--audio-subdir",
+        type=str,
+        default="clean_audio",
+        help="Audio subdirectory inside dataset (default: clean_audio)",
+    )
+    return parser.parse_args()
 
 
 def align_and_segment(
@@ -317,7 +332,14 @@ def _map_words_to_sentences(
 
 
 def main():
+    args = parse_args()
+    audio_dir = (DATASET_DIR / args.audio_subdir).expanduser()
+    if not audio_dir.exists() or not audio_dir.is_dir():
+        print(f"⚠️  Invalid audio directory: {audio_dir}")
+        sys.exit(1)
+
     SEGMENTS_DIR.mkdir(parents=True, exist_ok=True)
+    print(f"Using audio directory: {audio_dir}")
 
     # Determine device
     device = "cpu"
@@ -343,7 +365,7 @@ def main():
     all_segments = []
     for idx, entry in enumerate(entries):
         _, audio_name = entry["audio_file"].split("/")
-        audio_path = AUDIO_DIR / audio_name
+        audio_path = audio_dir / audio_name
         text_path = DATASET_DIR / entry["text_file"]
         video_id = entry["id"]
 
