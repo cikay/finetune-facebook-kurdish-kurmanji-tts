@@ -7,10 +7,9 @@ Unlike the Whisper-based approach, this aligns the *ground truth* text to the
 audio, producing accurate timestamps without ASR errors.
 
 Usage:
-   python segmentation.py --audio-subdir clean_audio
+   python segmentation.py --audio-subdir audio
 """
 
-import argparse
 from collections import Counter
 import json
 import re
@@ -37,13 +36,6 @@ from ctc_forced_aligner.alignment_utils import (
 from klpt.tokenize import Tokenize
 
 # ── Config ───────────────────────────────────────────────────────────────────
-DATASET_DIR = Path("dataset")
-AUDIO_DIR = DATASET_DIR / "audio"
-TEXT_DIR = DATASET_DIR / "text"
-META_FILE = DATASET_DIR / "metadata.jsonl"
-OUTPUT_DIR = Path("ctc_processed_dataset")
-SEGMENTS_DIR = DATASET_DIR / "segments"
-
 LANGUAGE = "kmr"  # ISO 639-3 for Kurmanji Kurdish
 SAMPLE_RATE = 16000
 
@@ -141,10 +133,10 @@ def split_into_sentences(text: str) -> list[str]:
 # ── Core pipeline ────────────────────────────────────────────────────────────
 
 
-def load_metadata() -> list[dict]:
+def load_metadata(meta_file: Path) -> list[dict]:
     """Load metadata.jsonl entries."""
     entries = []
-    with open(META_FILE, "r", encoding="utf-8") as f:
+    with open(meta_file, "r", encoding="utf-8") as f:
         for line in f:
             if line.strip():
                 entries.append(json.loads(line))
@@ -169,26 +161,13 @@ def should_discard(
     return False, ""
 
 
-def parse_args() -> argparse.Namespace:
-    """Parse CLI arguments."""
-    parser = argparse.ArgumentParser(
-        description="Segment audio using CTC forced alignment."
-    )
-    parser.add_argument(
-        "--audio-subdir",
-        type=str,
-        default="audio",
-        help="Audio subdirectory inside dataset (default: audio)",
-    )
-    return parser.parse_args()
-    
-
 def align_and_segment(
     alignment_model,
     alignment_tokenizer,
     audio_path: Path,
     text: str,
     output_prefix: str,
+    segments_dir: Path,
     device: str,
     dtype: torch.dtype,
 ) -> tuple[list[dict], dict[str, int]]:
@@ -283,7 +262,7 @@ def align_and_segment(
 
         # Save segment
         seg_filename = f"{output_prefix}_{i:04d}.wav"
-        seg_path = SEGMENTS_DIR / seg_filename
+        seg_path = segments_dir / seg_filename
         sf.write(seg_path, segment_audio, sr)
 
         segments_out.append(
@@ -362,14 +341,25 @@ def _map_words_to_sentences(
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 
-def main():
-    args = parse_args()
-    audio_dir = (DATASET_DIR / args.audio_subdir).expanduser()
+def run_segmentation(input_dirs: dict[str, Path], output_dirs: dict[str, Path]) -> None:
+    audio_dir = Path(input_dirs["audio"]).expanduser()
+    text_dir = Path(input_dirs["text"]).expanduser()
+    meta_file = Path(input_dirs["metadata"]).expanduser()
+    segments_dir = Path(output_dirs["audio_segments"]).expanduser()
+    segments_meta_file = Path(output_dirs["metadata"]).expanduser()
+
     if not audio_dir.exists() or not audio_dir.is_dir():
         print(f"⚠️  Invalid audio directory: {audio_dir}")
         sys.exit(1)
+    if not text_dir.exists() or not text_dir.is_dir():
+        print(f"⚠️  Invalid text directory: {text_dir}")
+        sys.exit(1)
+    if not meta_file.exists() or not meta_file.is_file():
+        print(f"⚠️  Invalid metadata file: {meta_file}")
+        sys.exit(1)
 
-    SEGMENTS_DIR.mkdir(parents=True, exist_ok=True)
+    segments_dir.mkdir(parents=True, exist_ok=True)
+    segments_meta_file.parent.mkdir(parents=True, exist_ok=True)
     print(f"Using audio directory: {audio_dir}")
 
     # Determine device
@@ -381,7 +371,7 @@ def main():
     dtype = torch.float16 if device == "cuda" else torch.float32
 
     # Load metadata
-    entries = load_metadata()
+    entries = load_metadata(meta_file)
     print(f"📋 {len(entries)} entries to process")
 
     # Load alignment model
@@ -396,9 +386,10 @@ def main():
     all_segments = []
     total_discard_counts = Counter()
     for idx, entry in enumerate(entries):
-        _, audio_name = entry["audio_file"].split("/")
+        audio_name = Path(entry["audio_file"]).name
+        text_name = Path(entry["text_file"]).name
         audio_path = audio_dir / audio_name
-        text_path = DATASET_DIR / entry["text_file"]
+        text_path = text_dir / text_name
         video_id = entry["id"]
 
         if not audio_path.exists():
@@ -426,6 +417,7 @@ def main():
                 audio_path,
                 text,
                 video_id,
+                segments_dir,
                 device,
                 dtype,
             )
@@ -457,12 +449,32 @@ def main():
     )
 
     # Save metadata JSONL
-    with open(DATASET_DIR / "segments_metadata.jsonl", "w", encoding="utf-8") as f:
+    with open(segments_meta_file, "w", encoding="utf-8") as f:
         for seg in all_segments:
             f.write(json.dumps(seg, ensure_ascii=False) + "\n")
 
     print("✅ Preprocessing complete!")
 
 
-if __name__ == "__main__":
-    main()
+class SegmentationBlock:
+    name: str = "segmentation"
+
+    def __init__(self, input_dirs: dict[str, Path], output_dirs: dict[str, Path]) -> None:
+        self.name = "segmentation"
+        self.input_dirs = input_dirs
+        self.output_dirs = output_dirs
+
+    def run(self) -> None:
+        required_inputs = {"audio", "text", "metadata"}
+        required_outputs = {"audio_segments", "metadata"}
+
+        missing_inputs = required_inputs - set(self.input_dirs)
+        missing_outputs = required_outputs - set(self.output_dirs)
+        if missing_inputs:
+            raise ValueError(f"Missing segmentation input_dirs keys: {sorted(missing_inputs)}")
+        if missing_outputs:
+            raise ValueError(
+                f"Missing segmentation output_dirs keys: {sorted(missing_outputs)}"
+            )
+
+        run_segmentation(self.input_dirs, self.output_dirs)

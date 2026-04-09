@@ -6,7 +6,7 @@ Download Kurdish Kurmanji TTS dataset:
 
 Usage:
     pip install yt-dlp trafilatura python-slugify
-    python download_dataset.py
+    python download_data.py
 """
 
 import json
@@ -21,20 +21,17 @@ from huggingface_hub import hf_hub_download
 from slugify import slugify
 
 # ── Config ───────────────────────────────────────────────────────────────────
-PLAYLIST_URL = "https://youtube.com/playlist?list=PLpi8IQW8sLlOmmCgJA00ecGLHYMBcS5bu"
-BASE_URL = "https://azadyawelat.com"
-OUTPUT_DIR = Path("dataset")
-AUDIO_DIR = OUTPUT_DIR / "audio"
-TEXT_DIR = OUTPUT_DIR / "text"
-META_FILE = OUTPUT_DIR / "metadata.jsonl"
+DEFAULT_PLAYLIST_URL = "https://youtube.com/playlist?list=PLpi8IQW8sLlOmmCgJA00ecGLHYMBcS5bu"
+DEFAULT_BASE_URL = "https://azadyawelat.com"
 SAMPLE_RATE = 16000  # 16kHz for TTS
-COOKIES_FILE = Path("cookies.txt")
 
 # fastText language identification (Facebook AI Research) via Hugging Face Hub
 FASTTEXT_MIN_PROB = 0.60
 
 
-def get_playlist_info() -> list[dict]:
+def get_playlist_info(
+    playlist_url: str, cookies_file: Path | None = None
+) -> list[dict]:
     """Fetch video metadata from the YouTube playlist using yt-dlp."""
     print("📥 Fetching playlist metadata...")
     try:
@@ -46,11 +43,11 @@ def get_playlist_info() -> list[dict]:
             "noplaylist": False,
             "cachedir": False,
         }
-        if COOKIES_FILE.exists():
-            ydl_opts["cookiefile"] = str(COOKIES_FILE)
+        if cookies_file and cookies_file.exists():
+            ydl_opts["cookiefile"] = str(cookies_file)
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(PLAYLIST_URL, download=False)
+            info = ydl.extract_info(playlist_url, download=False)
 
         entries = info.get("entries") or []
         videos: list[dict] = []
@@ -97,13 +94,19 @@ def detect_lang_fasttext(model, text: str) -> tuple[str | None, float]:
     return lang, prob
 
 
-def download_audio(video_url: str, video_id: str, output_path: Path) -> bool:
+def download_audio(
+    video_url: str,
+    video_id: str,
+    output_path: Path,
+    audio_dir: Path,
+    cookies_file: Path | None = None,
+) -> bool:
     """Download best audio via yt-dlp and convert to 16kHz mono WAV via FFmpeg."""
     if output_path.exists():
         print(f"  ⏭️  Audio already exists: {output_path.name}")
         return True
 
-    temp_dir = AUDIO_DIR / "_tmp"
+    temp_dir = audio_dir / "_tmp"
     temp_dir.mkdir(parents=True, exist_ok=True)
 
     try:
@@ -118,8 +121,8 @@ def download_audio(video_url: str, video_id: str, output_path: Path) -> bool:
             "fragment_retries": 3,
             "cachedir": False,
         }
-        if COOKIES_FILE.exists():
-            ydl_opts["cookiefile"] = str(COOKIES_FILE)
+        if cookies_file and cookies_file.exists():
+            ydl_opts["cookiefile"] = str(cookies_file)
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(video_url, download=True)
@@ -219,19 +222,33 @@ def build_full_text(article: dict) -> str:
     return "\n".join(parts)
 
 
-def main():
+def run_download_data(
+    input_dirs: dict[str, Path],
+    output_dirs: dict[str, Path],
+    playlist_url: str,
+    base_url: str,
+) -> None:
+    audio_dir = Path(output_dirs["audio"]).expanduser()
+    text_dir = Path(output_dirs["text"]).expanduser()
+    meta_file = Path(output_dirs["metadata"]).expanduser()
+    playlist_info_path = Path(output_dirs["playlist_info"]).expanduser()
+    cookies_file = (
+        Path(input_dirs["cookies"]).expanduser() if "cookies" in input_dirs else None
+    )
+
     # Create output directories
-    AUDIO_DIR.mkdir(parents=True, exist_ok=True)
-    TEXT_DIR.mkdir(parents=True, exist_ok=True)
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    text_dir.mkdir(parents=True, exist_ok=True)
+    meta_file.parent.mkdir(parents=True, exist_ok=True)
+    playlist_info_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Step 1: Get playlist info
-    playlist_info_path = OUTPUT_DIR / "playlist_info.json"
     if playlist_info_path.exists():
         with open(playlist_info_path, "r", encoding="utf-8") as f:
             videos = json.load(f)
         print(f"📋 Loaded playlist info from {playlist_info_path}")
     else:
-        videos = get_playlist_info()
+        videos = get_playlist_info(playlist_url, cookies_file)
         if not videos:
             print("No videos found. Exiting.")
             return
@@ -239,8 +256,8 @@ def main():
             json.dump(videos, f, ensure_ascii=False, indent=2)
         print(f"📋 Saved playlist info to {playlist_info_path}")
 
-    if COOKIES_FILE.exists():
-        print(f"🍪 Using cookies from {COOKIES_FILE}")
+    if cookies_file and cookies_file.exists():
+        print(f"🍪 Using cookies from {cookies_file}")
 
     langid_model = load_fasttext_langid_model()
 
@@ -258,7 +275,7 @@ def main():
         print(f"  Slug: {slug}")
 
         # Scrape article text
-        article_url = f"{BASE_URL}/{slug}/"
+        article_url = f"{base_url}/{slug}/"
         article = scrape_article(article_url)
 
         if not article:
@@ -275,8 +292,8 @@ def main():
             continue
 
         audio_filename = f"{video_id}.wav"
-        audio_path = AUDIO_DIR / audio_filename
-        audio_ok = download_audio(video["url"], video_id, audio_path)
+        audio_path = audio_dir / audio_filename
+        audio_ok = download_audio(video["url"], video_id, audio_path, audio_dir, cookies_file)
 
         if not audio_ok:
             fail_count += 1
@@ -287,7 +304,7 @@ def main():
 
         # Save text
         text_filename = f"{video_id}.txt"
-        text_path = TEXT_DIR / text_filename
+        text_path = text_dir / text_filename
         with open(text_path, "w", encoding="utf-8") as f:
             f.write(full_text)
 
@@ -313,18 +330,44 @@ def main():
         time.sleep(1)
 
     # Save metadata
-    with open(META_FILE, "w", encoding="utf-8") as f:
+    with open(meta_file, "w", encoding="utf-8") as f:
         for entry in metadata_entries:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
     # Summary
     print(f"\n{'='*60}")
     print(f"✅ Done! {success_count} pairs downloaded, {fail_count} failed")
-    print(f"📁 Output: {OUTPUT_DIR.resolve()}")
-    print(f"   Audio: {AUDIO_DIR.resolve()}")
-    print(f"   Text:  {TEXT_DIR.resolve()}")
-    print(f"   Meta:  {META_FILE.resolve()}")
+    print(f"📁 Output root: {meta_file.parent.resolve()}")
+    print(f"   Audio: {audio_dir.resolve()}")
+    print(f"   Text:  {text_dir.resolve()}")
+    print(f"   Meta:  {meta_file.resolve()}")
+    print(f"   Playlist: {playlist_info_path.resolve()}")
 
 
-if __name__ == "__main__":
-    main()
+class DownloadYoutubeAudioAndTextBlock:
+    def __init__(
+        self,
+        input_dirs: dict[str, Path],
+        output_dirs: dict[str, Path],
+        playlist_url: str = DEFAULT_PLAYLIST_URL,
+        base_url: str = DEFAULT_BASE_URL,
+    ) -> None:
+        self.name = "download_youtube_audio_and_text"
+        self.input_dirs = input_dirs
+        self.output_dirs = output_dirs
+        self.playlist_url = playlist_url
+        self.base_url = base_url
+
+    def run(self) -> None:
+        required_outputs = {"audio", "text", "metadata", "playlist_info"}
+        missing_outputs = required_outputs - set(self.output_dirs)
+        if missing_outputs:
+            raise ValueError(
+                f"Missing download_data output_dirs keys: {sorted(missing_outputs)}"
+            )
+        run_download_data(
+            self.input_dirs,
+            self.output_dirs,
+            playlist_url=self.playlist_url,
+            base_url=self.base_url,
+        )
