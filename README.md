@@ -13,6 +13,16 @@ pip install pipenv
 pipenv install
 ```
 
+### RunPod (CUDA Image) Note
+
+If you use `runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404`, keep PyTorch aligned with the image stack:
+
+```bash
+pipenv run python -c "import torch; print(torch.__version__, torch.version.cuda)"
+```
+
+Expected output should start with `2.8.0` and CUDA `12.8`.
+
 
 ## Pipeline
 
