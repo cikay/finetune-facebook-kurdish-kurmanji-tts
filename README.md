@@ -18,6 +18,8 @@ pipenv install
 If you use `runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404`, keep PyTorch aligned with the image stack:
 
 ```bash
+pipenv run pip install --no-cache-dir --force-reinstall torch==2.8.0 torchaudio==2.8.0 nvidia-cusparselt-cu12==0.7.1
+pipenv run pip install "fsspec[http]<=2026.2.0,>=2023.1.0"
 pipenv run python -c "import torch; print(torch.__version__, torch.version.cuda)"
 ```
 
