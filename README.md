@@ -10,45 +10,45 @@ It downloads news readings from a YouTube playlist, matches them with article te
 
 ```bash
 pip install pipenv
-bash setup.sh
+pipenv install
 ```
+
+### RunPod (CUDA Image) Note
+
+If you use `runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404`, keep PyTorch aligned with the image stack:
+
+```bash
+pipenv run pip install --no-cache-dir --force-reinstall torch==2.8.0 torchaudio==2.8.0 nvidia-cusparselt-cu12==0.7.1
+pipenv run pip install "fsspec[http]<=2026.2.0,>=2023.1.0"
+pipenv run python -c "import torch; print(torch.__version__, torch.version.cuda)"
+```
+
+Expected output should start with `2.8.0` and CUDA `12.8`.
 
 
 ## Pipeline
 
-### 1. Download
+Run the end-to-end pipeline:
 
 ```bash
-PIPENV_PIPFILE=Pipfile.linux pipenv run python download_dataset.py # for linux
-PIPENV_PIPFILE=Pipfile.mac pipenv run python download_dataset.py # for mac
+python dataset_creator.py
 ```
 
-Fetches audio and text pairs from Azadiya Welat:
+`dataset_creator.py` builds a simple block pipeline with:
 
-1. Fetches video metadata from a YouTube playlist using `yt-dlp`.
-2. Downloads each video's audio as a 16kHz mono WAV file.
-3. Derives a URL slug from the video title (with Kurdish diacritic normalization) and scrapes the matching article text from azadyawelat.com.
-4. Saves each audio/text pair and writes a `metadata.jsonl` index file.
+1. `DownloadYoutubeAudioAndTextBlock`
+2. `SegmentationBlock`
 
-### 2. Clean Audio
+### DownloadYoutubeAudioAndTextBlock
 
-```bash
-PIPENV_PIPFILE=Pipfile.linux pipenv run python clean_audio.py # for linux
-PIPENV_PIPFILE=Pipfile.mac pipenv run python clean_audio.py # for mac
-```
+Downloads paired audio/text data from YouTube and Azadiya Welat:
 
-Removes background music from audio files using [Demucs](https://github.com/adefossez/demucs) (Meta's source separation model):
+1. Fetches playlist metadata with `yt-dlp`.
+2. Downloads each video's audio as 16kHz mono WAV.
+3. Matches article text using title slug on `azadyawelat.com`.
+4. Writes `metadata.jsonl` and `playlist_info.json`.
 
-1. Runs Demucs vocal separation on all WAV files.
-2. Extracts the vocals (speech) track, discarding background music.
-3. Saves cleaned files to `dataset/clean_audio/` with matching filenames.
-
-### 3. Segmentation
-
-```bash
-PIPENV_PIPFILE=Pipfile.linux pipenv run python segmentation.py # for linux
-PIPENV_PIPFILE=Pipfile.mac pipenv run python segmentation.py # for mac
-```
+### SegmentationBlock
 
 | Variable | Default | Description |
 |---|---|---|
@@ -66,23 +66,21 @@ Splits long audio (~5 min each) into short utterances using forced alignment:
 4. Filters segments by duration (2–15s), word count (≥3), and alignment confidence.
 5. Saves segmented WAV files and `segments_metadata.jsonl`.
 
-### 4. Publish Dataset (`push_dataset.py`)
+### Publish Dataset (`push_dataset.py`)
 ```bash
-PIPENV_PIPFILE=Pipfile.linux pipenv run python push_dataset.py --repo your-username/your-dataset-name # for linux
-PIPENV_PIPFILE=Pipfile.mac pipenv run python push_dataset.py --repo your-username/your-dataset-name # for mac
+python push_dataset.py --repo your-username/your-dataset-name
 ```
 
 Uploads the segmented dataset to HuggingFace Hub.
 
 ## Output Structure
 
-```
-dataset/                        # Raw downloaded data
-├── audio/                      # WAV files (16kHz, mono)
-├── text/                       # Plain text files
-├── metadata.jsonl              # Audio/text path mappings
-└── playlist_info.json
-├── aligned/                   # Aligned and segmented data
-    ├── segments/                   # Short WAV utterances
-    └── segments_metadata.jsonl     # Segment metadata (audio, text, duration, score)
+```text
+test_dataset/
+├── audio/
+├── text/
+├── metadata.jsonl
+├── playlist_info.json
+├── audio_segments/
+└── segments_metadata.jsonl
 ```

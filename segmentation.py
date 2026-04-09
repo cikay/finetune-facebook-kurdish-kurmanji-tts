@@ -7,13 +7,14 @@ Unlike the Whisper-based approach, this aligns the *ground truth* text to the
 audio, producing accurate timestamps without ASR errors.
 
 Usage:
-   python segmentation.py --audio-subdir clean_audio
+   python segmentation.py --audio-subdir audio
 """
 
-import argparse
+from collections import Counter
 import json
 import re
 import sys
+import unicodedata
 from pathlib import Path
 
 import soundfile as sf
@@ -35,13 +36,6 @@ from ctc_forced_aligner.alignment_utils import (
 from klpt.tokenize import Tokenize
 
 # ── Config ───────────────────────────────────────────────────────────────────
-DATASET_DIR = Path("dataset")
-AUDIO_DIR = DATASET_DIR / "clean_audio"
-TEXT_DIR = DATASET_DIR / "text"
-META_FILE = DATASET_DIR / "metadata.jsonl"
-OUTPUT_DIR = Path("ctc_processed_dataset")
-SEGMENTS_DIR = DATASET_DIR / "segments"
-
 LANGUAGE = "kmr"  # ISO 639-3 for Kurmanji Kurdish
 SAMPLE_RATE = 16000
 
@@ -83,9 +77,7 @@ def get_alignments_fixed(
     dictionary["<star>"] = star_idx
 
     token_indices = [
-        dictionary[c]
-        for c in " ".join(tokens).split(" ")
-        if c in dictionary
+        dictionary[c] for c in " ".join(tokens).split(" ") if c in dictionary
     ]
 
     blank_id = dictionary.get("<blank>", tokenizer.pad_token_id)
@@ -108,9 +100,25 @@ def get_alignments_fixed(
 
 # ── Text utilities ───────────────────────────────────────────────────────────
 
+# Abbreviation / initialism patterns
+# - Matches dotted initialisms like "D.Y.A." or "A.B.D."
+# - Matches short title-style abbreviations like "Dr.", "Mr.", "Prof."
+# - Matches all-caps initialisms like "DYA", "PDK", "UNESCO"
+# - Uses a lookahead on the dotted branch to avoid matching normal sentence-final
+#   punctuation like "Ahmed."
+ABBR_RE = re.compile(
+    r"(?:"
+    r"\b(?:(?:[A-ZÇĞÎÛŞ]\.){2,}|[A-ZÇĞÎÛŞ][a-zçğıîûş]{1,3}\.)(?=\s*[A-Za-zÇĞÎÛŞçğıîûş])"
+    r"|"
+    r"\b[A-ZÇĞÎÛŞ]{2,}\b"
+    r")"
+)
+DIGIT_RE = re.compile(r"\d")
 
-def clean_text(text: str) -> str:
+
+def normalize_text(text: str) -> str:
     """Normalize whitespace and light cleanup for Kurdish Kurmanji text."""
+    text = unicodedata.normalize("NFC", text)
     text = text.strip()
     text = re.sub(r"\s+", " ", text)
     return text
@@ -118,34 +126,39 @@ def clean_text(text: str) -> str:
 
 def split_into_sentences(text: str) -> list[str]:
     """Split Kurdish text into sentences using KLPT."""
+    # TODO: check sentences by filter_segments_text.py if they include multiple sentences
     return klpt_tokenizer.sent_tokenize(text)
 
 
 # ── Core pipeline ────────────────────────────────────────────────────────────
 
 
-def load_metadata() -> list[dict]:
+def load_metadata(meta_file: Path) -> list[dict]:
     """Load metadata.jsonl entries."""
     entries = []
-    with open(META_FILE, "r", encoding="utf-8") as f:
+    with open(meta_file, "r", encoding="utf-8") as f:
         for line in f:
             if line.strip():
                 entries.append(json.loads(line))
     return entries
 
 
-def parse_args() -> argparse.Namespace:
-    """Parse CLI arguments."""
-    parser = argparse.ArgumentParser(
-        description="Segment audio using CTC forced alignment."
-    )
-    parser.add_argument(
-        "--audio-subdir",
-        type=str,
-        default="clean_audio",
-        help="Audio subdirectory inside dataset (default: clean_audio)",
-    )
-    return parser.parse_args()
+def should_discard(
+    sentence: str, duration: float, alignment_avg_score: float
+) -> tuple[bool, str]:
+    if duration < MIN_DURATION or duration > MAX_DURATION:
+        return True, "duration"
+    elif len(sentence.split()) < MIN_WORDS:
+        return True, "too_few_words"
+    # Filter by alignment quality
+    elif alignment_avg_score < MIN_SCORE:
+        return True, "low_score"
+    elif bool(ABBR_RE.search(sentence)):
+        return True, "abbreviations"
+    elif bool(DIGIT_RE.search(sentence)):
+        return True, "digits"
+
+    return False, ""
 
 
 def align_and_segment(
@@ -154,16 +167,20 @@ def align_and_segment(
     audio_path: Path,
     text: str,
     output_prefix: str,
+    segments_dir: Path,
     device: str,
     dtype: torch.dtype,
-) -> list[dict]:
+) -> tuple[list[dict], dict[str, int]]:
     """
     Perform forced alignment of ground truth text against audio,
     then split into sentence-level segments.
 
-    Returns list of {audio, text, duration, score} dicts.
+    Returns:
+      - list of {audio, text, duration, score} dicts
+      - discard reason counts for this source item
     """
     segments_out = []
+    discard_counts = Counter()
 
     # Load audio via ctc-forced-aligner (handles resampling to 16kHz mono)
     audio_waveform = load_audio(str(audio_path), dtype, device)
@@ -194,7 +211,7 @@ def align_and_segment(
 
     if not tokens_starred:
         print(f"    ⚠️  No alignable tokens for {output_prefix}")
-        return []
+        return [], dict(discard_counts)
 
     # Run forced alignment (using fixed version for HF tokenizer compat)
     segments, scores, blank_token = get_alignments_fixed(
@@ -210,7 +227,7 @@ def align_and_segment(
 
     if not word_timestamps:
         print(f"    ⚠️  No word timestamps for {output_prefix}")
-        return []
+        return [], dict(discard_counts)
 
     # Read original audio for slicing
     audio_data, sr = sf.read(audio_path)
@@ -218,27 +235,20 @@ def align_and_segment(
 
     # Map word timestamps back to sentence boundaries
     # Build a list of (sentence_text, start_time, end_time, avg_score) tuples
-    sentence_segments = _map_words_to_sentences(
-        sentences, full_text, word_timestamps
-    )
+    sentence_segments = _map_words_to_sentences(sentences, full_text, word_timestamps)
 
     # Slice audio for each sentence segment
+    
     for i, (sent_text, start_sec, end_sec, avg_score) in enumerate(sentence_segments):
         duration = end_sec - start_sec
 
-        # Filter by duration
-        if duration < MIN_DURATION or duration > MAX_DURATION:
+        should_discard_result, reason = should_discard(sent_text, duration, avg_score)
+        if should_discard_result:
+            print(f"    ⚠️  Discarding segment: '{sent_text}' | Reason: {reason}")
+            discard_counts[reason] += 1
             continue
 
-        # Filter by word count
-        word_count = len(sent_text.split())
-        if word_count < MIN_WORDS:
-            continue
-
-        # Filter by alignment quality
-        if avg_score < MIN_SCORE:
-            continue
-
+        print(f"    ✅ Keeping segment: '{sent_text}' | Duration: {duration:.1f}s | Score: {avg_score:.2f}")
         # Extract audio segment
         start_sample = int(start_sec * sr)
         end_sample = int(end_sec * sr)
@@ -252,7 +262,7 @@ def align_and_segment(
 
         # Save segment
         seg_filename = f"{output_prefix}_{i:04d}.wav"
-        seg_path = SEGMENTS_DIR / seg_filename
+        seg_path = segments_dir / seg_filename
         sf.write(seg_path, segment_audio, sr)
 
         segments_out.append(
@@ -264,7 +274,7 @@ def align_and_segment(
             }
         )
 
-    return segments_out
+    return segments_out, dict(discard_counts)
 
 
 def _map_words_to_sentences(
@@ -331,14 +341,25 @@ def _map_words_to_sentences(
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 
-def main():
-    args = parse_args()
-    audio_dir = (DATASET_DIR / args.audio_subdir).expanduser()
+def run_segmentation(input_dirs: dict[str, Path], output_dirs: dict[str, Path]) -> None:
+    audio_dir = Path(input_dirs["audio"]).expanduser()
+    text_dir = Path(input_dirs["text"]).expanduser()
+    meta_file = Path(input_dirs["metadata"]).expanduser()
+    segments_dir = Path(output_dirs["audio_segments"]).expanduser()
+    segments_meta_file = Path(output_dirs["metadata"]).expanduser()
+
     if not audio_dir.exists() or not audio_dir.is_dir():
         print(f"⚠️  Invalid audio directory: {audio_dir}")
         sys.exit(1)
+    if not text_dir.exists() or not text_dir.is_dir():
+        print(f"⚠️  Invalid text directory: {text_dir}")
+        sys.exit(1)
+    if not meta_file.exists() or not meta_file.is_file():
+        print(f"⚠️  Invalid metadata file: {meta_file}")
+        sys.exit(1)
 
-    SEGMENTS_DIR.mkdir(parents=True, exist_ok=True)
+    segments_dir.mkdir(parents=True, exist_ok=True)
+    segments_meta_file.parent.mkdir(parents=True, exist_ok=True)
     print(f"Using audio directory: {audio_dir}")
 
     # Determine device
@@ -350,7 +371,7 @@ def main():
     dtype = torch.float16 if device == "cuda" else torch.float32
 
     # Load metadata
-    entries = load_metadata()
+    entries = load_metadata(meta_file)
     print(f"📋 {len(entries)} entries to process")
 
     # Load alignment model
@@ -363,10 +384,12 @@ def main():
 
     # Process each audio file
     all_segments = []
+    total_discard_counts = Counter()
     for idx, entry in enumerate(entries):
-        _, audio_name = entry["audio_file"].split("/")
+        audio_name = Path(entry["audio_file"]).name
+        text_name = Path(entry["text_file"]).name
         audio_path = audio_dir / audio_name
-        text_path = DATASET_DIR / entry["text_file"]
+        text_path = text_dir / text_name
         video_id = entry["id"]
 
         if not audio_path.exists():
@@ -379,8 +402,7 @@ def main():
 
         # Read ground truth text
         with open(text_path, "r", encoding="utf-8") as f:
-            text = f.read()
-        text = clean_text(text)
+            text = normalize_text(f.read())
 
         if not text or len(text) < 20:
             print(f"  ⚠️  Text too short for {video_id}")
@@ -389,22 +411,30 @@ def main():
         print(f"[{idx + 1}/{len(entries)}] {entry['title'][:60]}...")
 
         try:
-            segs = align_and_segment(
+            segs, discard_counts = align_and_segment(
                 alignment_model,
                 alignment_tokenizer,
                 audio_path,
                 text,
                 video_id,
+                segments_dir,
                 device,
                 dtype,
             )
             all_segments.extend(segs)
+            total_discard_counts.update(discard_counts)
             print(f"  → {len(segs)} segments")
         except Exception as e:
             print(f"  ❌ Error: {e}")
             continue
 
     print(f"\n✅ Total segments: {len(all_segments)}")
+    total_discarded = sum(total_discard_counts.values())
+    print(f"🗑️  Total discarded: {total_discarded}")
+    if total_discard_counts:
+        print("🧾 Discard reasons:")
+        for reason, count in sorted(total_discard_counts.items()):
+            print(f"   - {reason}: {count}")
 
     if not all_segments:
         print("⚠️  No segments produced. Exiting.")
@@ -414,15 +444,37 @@ def main():
     total_dur = sum(s["duration"] for s in all_segments)
     avg_dur = total_dur / len(all_segments)
     avg_score = sum(s["score"] for s in all_segments) / len(all_segments)
-    print(f"📊 Total duration: {total_dur / 3600:.1f}h | Avg: {avg_dur:.1f}s | Avg score: {avg_score:.2f}")
+    print(
+        f"📊 Total duration: {total_dur / 3600:.1f}h | Avg: {avg_dur:.1f}s | Avg score: {avg_score:.2f}"
+    )
 
     # Save metadata JSONL
-    with open(DATASET_DIR / "segments_metadata.jsonl", "w", encoding="utf-8") as f:
+    with open(segments_meta_file, "w", encoding="utf-8") as f:
         for seg in all_segments:
             f.write(json.dumps(seg, ensure_ascii=False) + "\n")
 
     print("✅ Preprocessing complete!")
 
 
-if __name__ == "__main__":
-    main()
+class SegmentationBlock:
+    name: str = "segmentation"
+
+    def __init__(self, input_dirs: dict[str, Path], output_dirs: dict[str, Path]) -> None:
+        self.name = "segmentation"
+        self.input_dirs = input_dirs
+        self.output_dirs = output_dirs
+
+    def run(self) -> None:
+        required_inputs = {"audio", "text", "metadata"}
+        required_outputs = {"audio_segments", "metadata"}
+
+        missing_inputs = required_inputs - set(self.input_dirs)
+        missing_outputs = required_outputs - set(self.output_dirs)
+        if missing_inputs:
+            raise ValueError(f"Missing segmentation input_dirs keys: {sorted(missing_inputs)}")
+        if missing_outputs:
+            raise ValueError(
+                f"Missing segmentation output_dirs keys: {sorted(missing_outputs)}"
+            )
+
+        run_segmentation(self.input_dirs, self.output_dirs)
