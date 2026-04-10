@@ -10,6 +10,7 @@ It downloads news readings from a YouTube playlist, matches them with article te
 
 ```bash
 pip install pipenv
+pipenv shell
 pipenv install
 ```
 
@@ -31,7 +32,7 @@ Expected output should start with `2.8.0` and CUDA `12.8`.
 Run the end-to-end pipeline:
 
 ```bash
-python dataset_creator.py
+python -m finetune_tts.dataset_creator
 ```
 
 `dataset_creator.py` builds a simple block pipeline with:
