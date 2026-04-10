@@ -33,6 +33,7 @@ from ctc_forced_aligner.alignment_utils import (
     forced_align,
     merge_repeats,
 )
+from torchmetrics.functional.audio import deep_noise_suppression_mean_opinion_score
 
 # ── Config ───────────────────────────────────────────────────────────────────
 LANGUAGE = "kmr"  # ISO 639-3 for Kurmanji Kurdish
@@ -124,6 +125,45 @@ def normalize_text(text: str) -> str:
 
 def split_into_sentences(text: str) -> list[str]:
     return [s.strip() for s in SENTENCE_SPLIT_REGEX.findall(text) if s.strip()]
+
+
+# ── Audio quality metrics ────────────────────────────────────────────────────
+
+
+def calculate_dns_mos(waveform: np.ndarray, device: str = "cpu") -> dict[str, float]:
+    """
+    Calculate Deep Noise Suppression Mean Opinion Score for an audio waveform.
+
+    Args:
+        waveform: audio waveform as numpy array
+        device: device to use for computation ("cpu" or "cuda")
+
+    Returns:
+        dict with keys: p808_mos, mos_sig, mos_bak, mos_ovr
+    """
+    # Convert numpy array to torch tensor
+    if isinstance(waveform, np.ndarray):
+        waveform = torch.from_numpy(waveform).float()
+
+    # Ensure waveform is on the correct device for computation
+    waveform = waveform.to(device)
+
+    # Calculate DNS MOS (returns [p808_mos, mos_sig, mos_bak, mos_ovr])
+    dns_scores = deep_noise_suppression_mean_opinion_score(
+        preds=waveform,
+        fs=SAMPLE_RATE,
+        personalized=False,
+        device=device,
+    )
+
+    # Convert to dict for easier access
+    score_dict = {
+        "p808_mos": round(float(dns_scores[0]), 2),
+        "mos_sig": round(float(dns_scores[1]), 2),
+        "mos_bak": round(float(dns_scores[2]), 2),
+        "mos_ovr": round(float(dns_scores[3]), 2),
+    }
+    return score_dict
 
 
 # ── Core pipeline ────────────────────────────────────────────────────────────
@@ -258,6 +298,9 @@ def align_and_segment(
         if len(segment_audio) < int(MIN_DURATION * sr):
             continue
 
+        # Calculate DNS MOS for the segment
+        dns_mos_scores = calculate_dns_mos(segment_audio, device)
+
         # Save segment
         seg_filename = f"{output_prefix}_{i:04d}.wav"
         seg_path = segments_dir / seg_filename
@@ -269,6 +312,7 @@ def align_and_segment(
                 "text": sent_text,
                 "duration": round(duration, 2),
                 "align_score": round(align_score, 2),
+                "dns_mos": dns_mos_scores,
             }
         )
 
