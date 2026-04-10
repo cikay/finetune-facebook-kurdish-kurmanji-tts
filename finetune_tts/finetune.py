@@ -20,6 +20,7 @@ import json
 import logging
 import math
 import random
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -437,6 +438,15 @@ def load_checkpoint(
     return epoch
 
 
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+
+def _fmt_duration(seconds: float) -> str:
+    seconds = int(seconds)
+    h, m, s = seconds // 3600, (seconds % 3600) // 60, seconds % 60
+    return f"{h}h {m:02d}m {s:02d}s" if h else f"{m}m {s:02d}s"
+
+
 # ── Main training loop ────────────────────────────────────────────────────────
 
 
@@ -448,17 +458,36 @@ def train(args: SimpleNamespace) -> None:
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     logger.info("Device: %s", device)
+    if device == "cuda":
+        logger.info(
+            "GPU: %s  |  VRAM total: %.1f GB",
+            torch.cuda.get_device_name(0),
+            torch.cuda.get_device_properties(0).total_memory / 1e9,
+        )
 
     # ── Load tokenizer & model ────────────────────────────────────────────────
     logger.info("Loading model: %s", MODEL_ID)
+    t0 = time.time()
     tokenizer = VitsTokenizer.from_pretrained(MODEL_ID)
     model = VitsModel.from_pretrained(MODEL_ID)
     model = model.to(device)
     model.train()
+    total_params = sum(p.numel() for p in model.parameters())
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    logger.info(
+        "Model loaded in %.1fs  |  params: %s total, %s trainable",
+        time.time() - t0,
+        f"{total_params:,}",
+        f"{trainable_params:,}",
+    )
+    if device == "cuda":
+        logger.info("VRAM after model load: %.1f GB", torch.cuda.memory_allocated() / 1e9)
 
     # ── Load dataset ──────────────────────────────────────────────────────────
     logger.info("Loading local dataset…")
+    t0 = time.time()
     hf_ds = load_local_dataset()
+    logger.info("Dataset loaded in %.1fs  |  %d samples", time.time() - t0, len(hf_ds))
 
     # Optional: filter low-quality segments
     if args.min_align_score is not None:
@@ -482,7 +511,12 @@ def train(args: SimpleNamespace) -> None:
         [train_size, val_size],
         generator=torch.Generator().manual_seed(args.seed),
     )
-    logger.info("Train: %d  |  Val: %d", train_size, val_size)
+    logger.info(
+        "Train: %d  |  Val: %d  |  Steps/epoch: %d",
+        train_size,
+        val_size,
+        math.ceil(train_size / args.batch_size),
+    )
 
     train_loader = DataLoader(
         train_ds,
@@ -527,11 +561,15 @@ def train(args: SimpleNamespace) -> None:
 
     # ── Training loop ─────────────────────────────────────────────────────────
     best_val_loss = float("inf")
+    train_start = time.time()
 
     for epoch in range(start_epoch + 1, args.epochs + 1):
+        epoch_start = time.time()
         model.train()
         epoch_loss = 0.0
         epoch_counts: dict[str, float] = {}
+
+        logger.info("── Epoch %d/%d ──────────────────────────────", epoch, args.epochs)
 
         for step, batch in enumerate(train_loader):
             optimizer.zero_grad()
@@ -541,7 +579,7 @@ def train(args: SimpleNamespace) -> None:
 
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
+            grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
             scaler.step(optimizer)
             scaler.update()
 
@@ -551,16 +589,24 @@ def train(args: SimpleNamespace) -> None:
 
             if (step + 1) % args.log_interval == 0:
                 avg = {k: v / (step + 1) for k, v in epoch_counts.items()}
+                elapsed = time.time() - epoch_start
+                steps_done = step + 1
+                steps_left = len(train_loader) - steps_done
+                eta = elapsed / steps_done * steps_left
+                mem = f"  VRAM={torch.cuda.memory_allocated()/1e9:.1f}GB" if device == "cuda" else ""
                 logger.info(
-                    "Epoch %d | step %d/%d | %s",
-                    epoch,
-                    step + 1,
+                    "  step %d/%d | %s | grad_norm=%.3f | ETA %ds%s",
+                    steps_done,
                     len(train_loader),
                     "  ".join(f"{k}={v:.4f}" for k, v in avg.items()),
+                    grad_norm,
+                    int(eta),
+                    mem,
                 )
 
         scheduler.step()
         avg_train = epoch_loss / len(train_loader)
+        epoch_time = time.time() - epoch_start
 
         # ── Validation ────────────────────────────────────────────────────────
         model.eval()
@@ -572,13 +618,20 @@ def train(args: SimpleNamespace) -> None:
                 val_loss += loss.item()
         val_loss /= len(val_loader)
 
+        epochs_done = epoch - start_epoch
+        epochs_left = args.epochs - epoch
+        total_elapsed = time.time() - train_start
+        eta_total = total_elapsed / epochs_done * epochs_left
+
         logger.info(
-            "Epoch %d/%d — train_loss=%.4f  val_loss=%.4f  lr=%.2e",
+            "Epoch %d/%d — train=%.4f  val=%.4f  lr=%.2e  epoch_time=%ds  ETA %s",
             epoch,
             args.epochs,
             avg_train,
             val_loss,
             optimizer.param_groups[0]["lr"],
+            int(epoch_time),
+            _fmt_duration(eta_total),
         )
 
         # ── Checkpointing ─────────────────────────────────────────────────────
@@ -596,7 +649,11 @@ def train(args: SimpleNamespace) -> None:
     final_path = output_dir / "final_model"
     model.save_pretrained(final_path)
     tokenizer.save_pretrained(final_path)
-    logger.info("Training complete. Final model saved to %s", final_path)
+    logger.info(
+        "Training complete in %s. Final model saved to %s",
+        _fmt_duration(time.time() - train_start),
+        final_path,
+    )
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
