@@ -313,6 +313,7 @@ def align_and_segment(
                 "duration": round(duration, 2),
                 "align_score": round(align_score, 2),
                 "dns_mos": dns_mos_scores,
+                "word_count": len(sent_text.split()),
             }
         )
 
@@ -486,8 +487,9 @@ def run_segmentation(input_dirs: dict[str, Path], output_dirs: dict[str, Path]) 
     total_dur = sum(s["duration"] for s in all_segments)
     avg_dur = total_dur / len(all_segments)
     align_score = sum(s["align_score"] for s in all_segments) / len(all_segments)
+    avg_word_count = sum(s["word_count"] for s in all_segments) / len(all_segments)
     print(
-        f"📊 Total duration: {total_dur / 3600:.1f}h | Avg duration: {avg_dur:.1f}s | Avg Align score: {align_score:.2f}"
+        f"📊 Total duration: {total_dur / 3600:.1f}h | Avg duration: {avg_dur:.1f}s | Avg Align score: {align_score:.2f} | Avg word count: {avg_word_count:.1f}"
     )
 
     # Save metadata JSONL
