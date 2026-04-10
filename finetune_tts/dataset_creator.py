@@ -5,13 +5,13 @@ Simple dataset creation pipeline runner.
 
 from pathlib import Path
 
-from download_data import DownloadYoutubeAudioAndTextBlock
-from pipeline import PipelineBlock, run_pipeline
-from segmentation import SegmentationBlock
+from finetune_tts.download_data import DownloadYoutubeAudioAndTextBlock
+from finetune_tts.pipeline import PipelineBlock, run_pipeline
+from finetune_tts.segmentation import SegmentationBlock
 
 
 def build_pipeline() -> list[PipelineBlock]:
-    dataset_dir = Path("test_dataset")
+    dataset_dir = Path("dataset")
     return [
         DownloadYoutubeAudioAndTextBlock(
             input_dirs={
