@@ -490,16 +490,40 @@ def train(args: SimpleNamespace) -> None:
     logger.info("Dataset loaded in %.1fs  |  %d samples", time.time() - t0, len(hf_ds))
 
     # Optional: filter low-quality segments
+    before = len(hf_ds)
+    filters_active = []
+
     if args.min_align_score is not None:
-        before = len(hf_ds)
-        hf_ds = hf_ds.filter(
-            lambda x: x.get("align_score", 0) >= args.min_align_score
-        )
+        filters_active.append(f"align_score>={args.min_align_score}")
+
+    if args.min_p808_mos is not None:
+        filters_active.append(f"p808_mos>={args.min_p808_mos}")
+
+    if args.min_mos_ovr is not None:
+        filters_active.append(f"mos_ovr>={args.min_mos_ovr}")
+
+    if filters_active:
+        min_align = args.min_align_score
+        min_p808  = args.min_p808_mos
+        min_ovr   = args.min_mos_ovr
+
+        def _keep(x):
+            if min_align is not None and x.get("align_score", 0) < min_align:
+                return False
+            dns = x.get("dns_mos") or {}
+            if min_p808 is not None and dns.get("p808_mos", 0) < min_p808:
+                return False
+            if min_ovr is not None and dns.get("mos_ovr", 0) < min_ovr:
+                return False
+            return True
+
+        hf_ds = hf_ds.filter(_keep)
         logger.info(
-            "Filtered by align_score >= %.1f: %d → %d samples",
-            args.min_align_score,
+            "Quality filters [%s]: %d → %d samples (dropped %d)",
+            ", ".join(filters_active),
             before,
             len(hf_ds),
+            before - len(hf_ds),
         )
 
     dataset = KurmanjiTTSDataset(hf_ds, tokenizer)
