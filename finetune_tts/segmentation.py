@@ -33,6 +33,7 @@ from ctc_forced_aligner.alignment_utils import (
     forced_align,
     merge_repeats,
 )
+from torchmetrics.functional.audio import deep_noise_suppression_mean_opinion_score
 
 # ── Config ───────────────────────────────────────────────────────────────────
 LANGUAGE = "kmr"  # ISO 639-3 for Kurmanji Kurdish
@@ -126,6 +127,45 @@ def split_into_sentences(text: str) -> list[str]:
     return [s.strip() for s in SENTENCE_SPLIT_REGEX.findall(text) if s.strip()]
 
 
+# ── Audio quality metrics ────────────────────────────────────────────────────
+
+
+def calculate_dns_mos(waveform: np.ndarray, device: str = "cpu") -> dict[str, float]:
+    """
+    Calculate Deep Noise Suppression Mean Opinion Score for an audio waveform.
+
+    Args:
+        waveform: audio waveform as numpy array
+        device: device to use for computation ("cpu" or "cuda")
+
+    Returns:
+        dict with keys: p808_mos, mos_sig, mos_bak, mos_ovr
+    """
+    # Convert numpy array to torch tensor
+    if isinstance(waveform, np.ndarray):
+        waveform = torch.from_numpy(waveform).float()
+
+    # Ensure waveform is on the correct device for computation
+    waveform = waveform.to(device)
+
+    # Calculate DNS MOS (returns [p808_mos, mos_sig, mos_bak, mos_ovr])
+    dns_scores = deep_noise_suppression_mean_opinion_score(
+        preds=waveform,
+        fs=SAMPLE_RATE,
+        personalized=False,
+        device=device,
+    )
+
+    # Convert to dict for easier access
+    score_dict = {
+        "p808_mos": round(float(dns_scores[0]), 2),
+        "mos_sig": round(float(dns_scores[1]), 2),
+        "mos_bak": round(float(dns_scores[2]), 2),
+        "mos_ovr": round(float(dns_scores[3]), 2),
+    }
+    return score_dict
+
+
 # ── Core pipeline ────────────────────────────────────────────────────────────
 
 
@@ -140,14 +180,14 @@ def load_metadata(meta_file: Path) -> list[dict]:
 
 
 def should_discard(
-    sentence: str, duration: float, alignment_avg_score: float
+    sentence: str, duration: float, align_score: float
 ) -> tuple[bool, str]:
     if duration < MIN_DURATION or duration > MAX_DURATION:
         return True, "duration"
     elif len(sentence.split()) < MIN_WORDS:
         return True, "too_few_words"
     # Filter by alignment quality
-    elif alignment_avg_score < MIN_SCORE:
+    elif align_score < MIN_SCORE:
         return True, "low_score"
     elif bool(ABBR_RE.search(sentence)):
         return True, "abbreviations"
@@ -230,22 +270,22 @@ def align_and_segment(
     assert sr == SAMPLE_RATE, f"Expected {SAMPLE_RATE}Hz, got {sr}Hz"
 
     # Map word timestamps back to sentence boundaries
-    # Build a list of (sentence_text, start_time, end_time, avg_score) tuples
+    # Build a list of (sentence_text, start_time, end_time, align_score) tuples
     sentence_segments = _map_words_to_sentences(sentences, full_text, word_timestamps)
 
     # Slice audio for each sentence segment
 
-    for i, (sent_text, start_sec, end_sec, avg_score) in enumerate(sentence_segments):
+    for i, (sent_text, start_sec, end_sec, align_score) in enumerate(sentence_segments):
         duration = end_sec - start_sec
 
-        should_discard_result, reason = should_discard(sent_text, duration, avg_score)
+        should_discard_result, reason = should_discard(sent_text, duration, align_score)
         if should_discard_result:
             print(f"    ⚠️  Discarding segment: '{sent_text}' | Reason: {reason}")
             discard_counts[reason] += 1
             continue
 
         print(
-            f"    ✅ Keeping segment: '{sent_text}' | Duration: {duration:.1f}s | Score: {avg_score:.2f}"
+            f"    ✅ Keeping segment: '{sent_text}' | Duration: {duration:.1f}s | Align Score: {align_score:.2f}"
         )
         # Extract audio segment
         start_sample = int(start_sec * sr)
@@ -258,6 +298,9 @@ def align_and_segment(
         if len(segment_audio) < int(MIN_DURATION * sr):
             continue
 
+        # Calculate DNS MOS for the segment
+        dns_mos_scores = calculate_dns_mos(segment_audio, device)
+
         # Save segment
         seg_filename = f"{output_prefix}_{i:04d}.wav"
         seg_path = segments_dir / seg_filename
@@ -268,7 +311,9 @@ def align_and_segment(
                 "audio": str(seg_path),
                 "text": sent_text,
                 "duration": round(duration, 2),
-                "score": round(avg_score, 2),
+                "align_score": round(align_score, 2),
+                "dns_mos": dns_mos_scores,
+                "word_count": len(sent_text.split()),
             }
         )
 
@@ -283,7 +328,7 @@ def _map_words_to_sentences(
     """
     Map word-level timestamps back to sentence boundaries.
 
-    Returns: list of (sentence_text, start_sec, end_sec, avg_score)
+    Returns: list of (sentence_text, start_sec, end_sec, align_score)
     """
     result = []
 
@@ -328,8 +373,8 @@ def _map_words_to_sentences(
         if starts and ends:
             start_sec = min(starts)  # already in seconds
             end_sec = max(ends)
-            avg_score = sum(scores_list) / len(scores_list) if scores_list else 0
-            result.append((sentence, start_sec, end_sec, avg_score))
+            align_score = sum(scores_list) / len(scores_list) if scores_list else 0
+            result.append((sentence, start_sec, end_sec, align_score))
 
         word_idx = end_word_idx
 
@@ -441,9 +486,10 @@ def run_segmentation(input_dirs: dict[str, Path], output_dirs: dict[str, Path]) 
     # Stats
     total_dur = sum(s["duration"] for s in all_segments)
     avg_dur = total_dur / len(all_segments)
-    avg_score = sum(s["score"] for s in all_segments) / len(all_segments)
+    align_score = sum(s["align_score"] for s in all_segments) / len(all_segments)
+    avg_word_count = sum(s["word_count"] for s in all_segments) / len(all_segments)
     print(
-        f"📊 Total duration: {total_dur / 3600:.1f}h | Avg: {avg_dur:.1f}s | Avg score: {avg_score:.2f}"
+        f"📊 Total duration: {total_dur / 3600:.1f}h | Avg duration: {avg_dur:.1f}s | Avg Align score: {align_score:.2f} | Avg word count: {avg_word_count:.1f}"
     )
 
     # Save metadata JSONL
