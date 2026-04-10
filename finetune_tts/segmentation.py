@@ -33,7 +33,6 @@ from ctc_forced_aligner.alignment_utils import (
     forced_align,
     merge_repeats,
 )
-from klpt.tokenize import Tokenize
 
 # ── Config ───────────────────────────────────────────────────────────────────
 LANGUAGE = "kmr"  # ISO 639-3 for Kurmanji Kurdish
@@ -50,10 +49,9 @@ MAX_DURATION = 15.0  # seconds
 MIN_WORDS = 3  # minimum words per segment
 MIN_SCORE = -7.0  # minimum average alignment score (log-prob; more negative = worse)
 
-
-klpt_tokenizer = Tokenize("Kurmanji", "Latin")
-
-# ── Fixed alignment (star token index bug workaround) ────────────────────────
+# Regex for splitting text into sentences
+# Keeps ending punctuation (.!?) with each sentence
+SENTENCE_SPLIT_REGEX = re.compile(r"[^.!?]*[.!?]+")
 
 
 def get_alignments_fixed(
@@ -125,9 +123,7 @@ def normalize_text(text: str) -> str:
 
 
 def split_into_sentences(text: str) -> list[str]:
-    """Split Kurdish text into sentences using KLPT."""
-    # TODO: check sentences by filter_segments_text.py if they include multiple sentences
-    return klpt_tokenizer.sent_tokenize(text)
+    return [s.strip() for s in SENTENCE_SPLIT_REGEX.findall(text) if s.strip()]
 
 
 # ── Core pipeline ────────────────────────────────────────────────────────────
@@ -238,7 +234,7 @@ def align_and_segment(
     sentence_segments = _map_words_to_sentences(sentences, full_text, word_timestamps)
 
     # Slice audio for each sentence segment
-    
+
     for i, (sent_text, start_sec, end_sec, avg_score) in enumerate(sentence_segments):
         duration = end_sec - start_sec
 
@@ -248,7 +244,9 @@ def align_and_segment(
             discard_counts[reason] += 1
             continue
 
-        print(f"    ✅ Keeping segment: '{sent_text}' | Duration: {duration:.1f}s | Score: {avg_score:.2f}")
+        print(
+            f"    ✅ Keeping segment: '{sent_text}' | Duration: {duration:.1f}s | Score: {avg_score:.2f}"
+        )
         # Extract audio segment
         start_sample = int(start_sec * sr)
         end_sample = int(end_sec * sr)
@@ -459,7 +457,9 @@ def run_segmentation(input_dirs: dict[str, Path], output_dirs: dict[str, Path]) 
 class SegmentationBlock:
     name: str = "segmentation"
 
-    def __init__(self, input_dirs: dict[str, Path], output_dirs: dict[str, Path]) -> None:
+    def __init__(
+        self, input_dirs: dict[str, Path], output_dirs: dict[str, Path]
+    ) -> None:
         self.name = "segmentation"
         self.input_dirs = input_dirs
         self.output_dirs = output_dirs
@@ -471,7 +471,9 @@ class SegmentationBlock:
         missing_inputs = required_inputs - set(self.input_dirs)
         missing_outputs = required_outputs - set(self.output_dirs)
         if missing_inputs:
-            raise ValueError(f"Missing segmentation input_dirs keys: {sorted(missing_inputs)}")
+            raise ValueError(
+                f"Missing segmentation input_dirs keys: {sorted(missing_inputs)}"
+            )
         if missing_outputs:
             raise ValueError(
                 f"Missing segmentation output_dirs keys: {sorted(missing_outputs)}"

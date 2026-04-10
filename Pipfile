@@ -20,9 +20,9 @@ torchaudio = "==2.8.0"
 ctc-forced-aligner = {git = "https://github.com/MahmoudAshraf97/ctc-forced-aligner.git"}
 python-dotenv = "==1.2.2"
 demucs = "==4.0.1"
-klpt = "==0.1.7"
 
 [dev-packages]
+pytest = "*"
 
 [requires]
 python_version = "3.12"
