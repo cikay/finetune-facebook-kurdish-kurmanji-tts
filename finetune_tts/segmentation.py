@@ -140,14 +140,14 @@ def load_metadata(meta_file: Path) -> list[dict]:
 
 
 def should_discard(
-    sentence: str, duration: float, alignment_avg_score: float
+    sentence: str, duration: float, align_score: float
 ) -> tuple[bool, str]:
     if duration < MIN_DURATION or duration > MAX_DURATION:
         return True, "duration"
     elif len(sentence.split()) < MIN_WORDS:
         return True, "too_few_words"
     # Filter by alignment quality
-    elif alignment_avg_score < MIN_SCORE:
+    elif align_score < MIN_SCORE:
         return True, "low_score"
     elif bool(ABBR_RE.search(sentence)):
         return True, "abbreviations"
@@ -230,22 +230,22 @@ def align_and_segment(
     assert sr == SAMPLE_RATE, f"Expected {SAMPLE_RATE}Hz, got {sr}Hz"
 
     # Map word timestamps back to sentence boundaries
-    # Build a list of (sentence_text, start_time, end_time, avg_score) tuples
+    # Build a list of (sentence_text, start_time, end_time, align_score) tuples
     sentence_segments = _map_words_to_sentences(sentences, full_text, word_timestamps)
 
     # Slice audio for each sentence segment
 
-    for i, (sent_text, start_sec, end_sec, avg_score) in enumerate(sentence_segments):
+    for i, (sent_text, start_sec, end_sec, align_score) in enumerate(sentence_segments):
         duration = end_sec - start_sec
 
-        should_discard_result, reason = should_discard(sent_text, duration, avg_score)
+        should_discard_result, reason = should_discard(sent_text, duration, align_score)
         if should_discard_result:
             print(f"    ⚠️  Discarding segment: '{sent_text}' | Reason: {reason}")
             discard_counts[reason] += 1
             continue
 
         print(
-            f"    ✅ Keeping segment: '{sent_text}' | Duration: {duration:.1f}s | Score: {avg_score:.2f}"
+            f"    ✅ Keeping segment: '{sent_text}' | Duration: {duration:.1f}s | Align Score: {align_score:.2f}"
         )
         # Extract audio segment
         start_sample = int(start_sec * sr)
@@ -268,7 +268,7 @@ def align_and_segment(
                 "audio": str(seg_path),
                 "text": sent_text,
                 "duration": round(duration, 2),
-                "score": round(avg_score, 2),
+                "align_score": round(align_score, 2),
             }
         )
 
@@ -283,7 +283,7 @@ def _map_words_to_sentences(
     """
     Map word-level timestamps back to sentence boundaries.
 
-    Returns: list of (sentence_text, start_sec, end_sec, avg_score)
+    Returns: list of (sentence_text, start_sec, end_sec, align_score)
     """
     result = []
 
@@ -328,8 +328,8 @@ def _map_words_to_sentences(
         if starts and ends:
             start_sec = min(starts)  # already in seconds
             end_sec = max(ends)
-            avg_score = sum(scores_list) / len(scores_list) if scores_list else 0
-            result.append((sentence, start_sec, end_sec, avg_score))
+            align_score = sum(scores_list) / len(scores_list) if scores_list else 0
+            result.append((sentence, start_sec, end_sec, align_score))
 
         word_idx = end_word_idx
 
@@ -441,9 +441,9 @@ def run_segmentation(input_dirs: dict[str, Path], output_dirs: dict[str, Path]) 
     # Stats
     total_dur = sum(s["duration"] for s in all_segments)
     avg_dur = total_dur / len(all_segments)
-    avg_score = sum(s["score"] for s in all_segments) / len(all_segments)
+    align_score = sum(s["align_score"] for s in all_segments) / len(all_segments)
     print(
-        f"📊 Total duration: {total_dur / 3600:.1f}h | Avg: {avg_dur:.1f}s | Avg score: {avg_score:.2f}"
+        f"📊 Total duration: {total_dur / 3600:.1f}h | Avg duration: {avg_dur:.1f}s | Avg Align score: {align_score:.2f}"
     )
 
     # Save metadata JSONL
