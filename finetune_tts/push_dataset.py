@@ -11,12 +11,12 @@ Usage:
 """
 
 import argparse
-import json
 import os
 from pathlib import Path
 
 from dotenv import load_dotenv
-from datasets import Audio, Dataset
+
+from finetune_tts.load_dataset_from_local import load_dataset
 
 load_dotenv()
 
@@ -34,18 +34,7 @@ def main():
     )
     args = parser.parse_args()
 
-    # Load metadata
-    segments = []
-    with open(METADATA_FILE, "r", encoding="utf-8") as f:
-        for line in f:
-            if line.strip():
-                segments.append(json.loads(line))
-
-    print(f"📋 {len(segments)} segments loaded from {METADATA_FILE}")
-
-    # Build dataset
-    ds = Dataset.from_list(segments)
-    ds = ds.cast_column("audio", Audio(sampling_rate=SAMPLE_RATE))
+    dataset = load_dataset()
 
     # Push
     token = os.environ.get("HF_TOKEN")
@@ -53,7 +42,7 @@ def main():
         print("❌ Set HF_TOKEN env variable first: export HF_TOKEN=hf_...")
         return
     print(f"🚀 Pushing to {args.repo}")
-    ds.push_to_hub(args.repo, token=token)
+    dataset.push_to_hub(args.repo, token=token)
     print(f"✅ Done! https://huggingface.co/datasets/{args.repo}")
 
 
