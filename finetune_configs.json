@@ -15,7 +15,7 @@
     "max_text_len": 200,
     "max_audio_secs": 14.5,
 
-    "save_every": 500,
+
     "log_every": 10,
 
     "freeze_decoder": false,
@@ -41,7 +41,7 @@
     "max_text_len": 200,
     "max_audio_secs": 14.5,
 
-    "save_every": 100,
+
     "log_every": 5,
 
     "freeze_decoder": false,
@@ -67,7 +67,7 @@
     "max_text_len": 200,
     "max_audio_secs": 14.5,
 
-    "save_every": 500,
+
     "log_every": 10,
 
     "freeze_decoder": true,
@@ -93,7 +93,7 @@
     "max_text_len": 200,
     "max_audio_secs": 14.5,
 
-    "save_every": 1000,
+
     "log_every": 10,
 
     "freeze_decoder": false,

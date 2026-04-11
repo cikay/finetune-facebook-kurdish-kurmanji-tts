@@ -641,9 +641,6 @@ def main():
                     scheduler.get_last_lr()[0],
                 )
 
-            if global_step % cfg["save_every"] == 0:
-                save_checkpoint(model, optimizer, scheduler, global_step, epoch, output_dir)
-
         if warmup_steps == 0:
             scheduler.step()  # epoch-level for pure exponential decay
         avg = epoch_loss / max(len(loader), 1)
