@@ -452,7 +452,14 @@ def train_step(
 
 # ── Checkpoint helpers ────────────────────────────────────────────────────────
 
-def save_checkpoint(model, optimizer, scheduler, step, epoch, out_dir: Path):
+def save_checkpoint(
+    model, optimizer, scheduler, step, epoch, out_dir: Path,
+    loss: float | None = None, best_loss: float | None = None,
+) -> float:
+    """Save a regular checkpoint and, if loss is the new best, also save as best.
+
+    Returns the updated best_loss.
+    """
     out_dir.mkdir(parents=True, exist_ok=True)
     ckpt = {
         "step": step,
@@ -460,12 +467,19 @@ def save_checkpoint(model, optimizer, scheduler, step, epoch, out_dir: Path):
         "model": model.state_dict(),
         "optimizer": optimizer.state_dict(),
         "scheduler": scheduler.state_dict(),
+        "loss": loss,
     }
     path = out_dir / f"checkpoint_step{step:07d}.pt"
     torch.save(ckpt, path)
-    # Also overwrite a fixed "latest" pointer so inference scripts can find it easily
     torch.save(ckpt, out_dir / "checkpoint_latest.pt")
     log.info("Saved checkpoint → %s", path)
+
+    if loss is not None and (best_loss is None or loss < best_loss):
+        torch.save(ckpt, out_dir / "checkpoint_best.pt")
+        log.info("New best loss %.4f → saved checkpoint_best.pt", loss)
+        return loss
+
+    return best_loss if best_loss is not None else float("inf")
 
 
 def load_checkpoint(model, optimizer, scheduler, ckpt_path: Path):
@@ -474,7 +488,8 @@ def load_checkpoint(model, optimizer, scheduler, ckpt_path: Path):
     model.load_state_dict(ckpt["model"])
     optimizer.load_state_dict(ckpt["optimizer"])
     scheduler.load_state_dict(ckpt["scheduler"])
-    return ckpt["step"], ckpt["epoch"]
+    best_loss = ckpt.get("loss")  # may be None for old checkpoints
+    return ckpt["step"], ckpt["epoch"], best_loss
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -582,8 +597,11 @@ def main():
     # ── Resume ──
     global_step = 0
     start_epoch = 0
+    best_loss = float("inf")
     if args.resume is not None:
-        global_step, start_epoch = load_checkpoint(model, optimizer, scheduler, args.resume)
+        global_step, start_epoch, saved_loss = load_checkpoint(model, optimizer, scheduler, args.resume)
+        if saved_loss is not None:
+            best_loss = saved_loss
         start_epoch += 1
 
     # ── Training loop ──
@@ -630,6 +648,10 @@ def main():
             scheduler.step()  # epoch-level for pure exponential decay
         avg = epoch_loss / max(len(loader), 1)
         log.info("-- Epoch %d done  avg_loss=%.4f --", epoch, avg)
+        best_loss = save_checkpoint(
+            model, optimizer, scheduler, global_step, epoch, output_dir,
+            loss=avg, best_loss=best_loss,
+        )
 
     # Final checkpoint
     save_checkpoint(model, optimizer, scheduler, global_step, cfg["epochs"] - 1, output_dir)
