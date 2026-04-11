@@ -34,7 +34,7 @@ def main():
     )
     args = parser.parse_args()
 
-    dataset = load_dataset()
+    dataset = load_dataset(cast_audio=True)
 
     # Push
     token = os.environ.get("HF_TOKEN")

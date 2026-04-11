@@ -2,21 +2,23 @@ import json
 from pathlib import Path
 from typing import Callable
 
-from datasets import Dataset
+from datasets import Dataset, Audio
 
 METADATA_FILE = Path("dataset/segments_metadata.jsonl")
 SAMPLE_RATE = 16000
 
 
-def load_dataset(filter_fn: Callable[[dict], bool] | None = None) -> Dataset:
+def load_dataset(
+    filter_fn: Callable[[dict], bool] | None = None,
+    cast_audio: bool = False,
+) -> Dataset:
     """Load the local segmented dataset.
-
-    The ``audio`` column is kept as a plain file-path string — no HF Audio cast.
-    Audio is loaded on demand in the training Dataset class using soundfile,
-    which avoids pulling in torchcodec entirely.
 
     Args:
         filter_fn: optional callable applied to each raw metadata dict.
+        cast_audio: if True, cast the ``audio`` column to HF Audio feature
+                    (required for push_to_hub so audio files are uploaded).
+                    Leave False for training (audio loaded on demand via soundfile).
     """
     segments = []
     with open(METADATA_FILE, "r", encoding="utf-8") as f:
@@ -31,4 +33,9 @@ def load_dataset(filter_fn: Callable[[dict], bool] | None = None) -> Dataset:
         segments = [s for s in segments if filter_fn(s)]
         print(f"🔍 Filtered: {before} → {len(segments)} segments")
 
-    return Dataset.from_list(segments)
+    dataset = Dataset.from_list(segments)
+
+    if cast_audio:
+        dataset = dataset.cast_column("audio", Audio(sampling_rate=SAMPLE_RATE))
+
+    return dataset
