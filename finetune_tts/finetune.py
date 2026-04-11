@@ -25,6 +25,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
+import soundfile as sf
 import torch
 import torch.nn.functional as F
 from torch.cuda.amp import GradScaler, autocast
@@ -182,7 +183,7 @@ class KurmanjiTTSDataset(Dataset):
     def __getitem__(self, idx: int) -> dict:
         item = self.data[idx]
         text: str = item["text"]
-        audio_array: np.ndarray = item["audio"]["array"].astype(np.float32)
+        audio_array, _ = sf.read(item["audio"], dtype="float32")
 
         # Clip to max duration
         audio_array = audio_array[:MAX_WAV_SAMPLES]
