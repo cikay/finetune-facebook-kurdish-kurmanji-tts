@@ -1,0 +1,97 @@
+{
+  "default": {
+    "model_id": "facebook/mms-tts-kmr-script_latin",
+    "output_dir": "checkpoints/mms-tts-kmr-finetuned",
+
+    "epochs": 100,
+    "batch_size": 1,
+    "lr": 2e-4,
+    "lr_decay": 0.999875,
+    "grad_clip": 1.0,
+    "mel_lambda": 45.0,
+
+    "max_text_len": 200,
+    "max_audio_secs": 14.5,
+
+    "save_every": 500,
+    "log_every": 10,
+
+    "freeze_decoder": false,
+
+    "min_align_score": -5.0,
+    "min_duration": 2.0,
+    "max_duration": 14.5
+  },
+
+  "quick": {
+    "model_id": "facebook/mms-tts-kmr-script_latin",
+    "output_dir": "checkpoints/mms-tts-kmr-quick",
+
+    "epochs": 10,
+    "batch_size": 1,
+    "lr": 2e-4,
+    "lr_decay": 0.999875,
+    "grad_clip": 1.0,
+    "mel_lambda": 45.0,
+
+    "max_text_len": 200,
+    "max_audio_secs": 14.5,
+
+    "save_every": 100,
+    "log_every": 5,
+
+    "freeze_decoder": false,
+
+    "min_align_score": -5.0,
+    "min_duration": 2.0,
+    "max_duration": 14.5
+  },
+
+  "decoder_only": {
+    "model_id": "facebook/mms-tts-kmr-script_latin",
+    "output_dir": "checkpoints/mms-tts-kmr-decoder",
+
+    "epochs": 50,
+    "batch_size": 1,
+    "lr": 1e-4,
+    "lr_decay": 0.999875,
+    "grad_clip": 1.0,
+    "mel_lambda": 45.0,
+
+    "max_text_len": 200,
+    "max_audio_secs": 14.5,
+
+    "save_every": 500,
+    "log_every": 10,
+
+    "freeze_decoder": true,
+
+    "min_align_score": -5.0,
+    "min_duration": 2.0,
+    "max_duration": 14.5
+  },
+
+  "high_quality": {
+    "model_id": "facebook/mms-tts-kmr-script_latin",
+    "output_dir": "checkpoints/mms-tts-kmr-hq",
+
+    "epochs": 200,
+    "batch_size": 1,
+    "lr": 2e-4,
+    "lr_decay": 0.9999,
+    "grad_clip": 1.0,
+    "mel_lambda": 45.0,
+
+    "max_text_len": 200,
+    "max_audio_secs": 14.5,
+
+    "save_every": 1000,
+    "log_every": 10,
+
+    "freeze_decoder": false,
+
+    "min_align_score": -3.0,
+    "min_duration": 2.0,
+    "max_duration": 12.0
+  }
+}
