@@ -58,7 +58,9 @@
     "seed": 42,
     "min_align_score": -3.0,
     "min_p808_mos": 3.0,
-    "min_mos_ovr": 3.0
+    "min_mos_ovr": 3.0,
+    "kl_weight_start": 0.01,
+    "kl_warmup_epochs": 20
   },
   "debug": {
     "output_dir": "checkpoints/kmr_debug",
