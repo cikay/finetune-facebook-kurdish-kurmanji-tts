@@ -579,8 +579,12 @@ def train(args: SimpleNamespace) -> None:
                                     betas=(0.8, 0.99), weight_decay=args.weight_decay)
     optim_disc = torch.optim.AdamW(disc_params, lr=args.disc_lr,
                                     betas=(0.8, 0.99), weight_decay=args.weight_decay)
-    sched_gen  = torch.optim.lr_scheduler.ExponentialLR(optim_gen,  gamma=args.lr_decay)
-    sched_disc = torch.optim.lr_scheduler.ExponentialLR(optim_disc, gamma=args.lr_decay)
+    sched_gen  = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optim_gen, mode="min", factor=0.5, patience=5, min_lr=1e-6,
+    )
+    sched_disc = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optim_disc, mode="min", factor=0.5, patience=5, min_lr=1e-6,
+    )
 
     # Mixed precision
     use_amp    = (device == "cuda" and args.fp16)
@@ -701,39 +705,47 @@ def train(args: SimpleNamespace) -> None:
                     grad_norm, int(eta), mem,
                 )
 
-        sched_gen.step()
-        sched_disc.step()
         avg_train  = epoch_loss_gen / len(train_loader)
         epoch_time = time.time() - epoch_start
 
-        # ── Validation (generator losses only, kl_weight=1.0) ─────────────────
+        # ── Validation ────────────────────────────────────────────────────────
         model.eval(); mpd.eval(); msd.eval()
-        val_loss = 0.0
+        val_mel = 0.0
+        val_kl  = 0.0
+        val_dur = 0.0
         with torch.no_grad():
             for batch in val_loader:
                 with autocast("cuda", enabled=use_amp):
                     out = forward_generator_pass(model, batch, device, mel_transform)
-                    val_loss += (out["loss_mel"] + out["loss_kl"] + out["loss_dur"]).item()
-        val_loss /= len(val_loader)
+                    val_mel += out["loss_mel"].item()
+                    val_kl  += out["loss_kl"].item()
+                    val_dur += out["loss_dur"].item()
+        val_mel /= len(val_loader)
+        val_kl  /= len(val_loader)
+        val_dur /= len(val_loader)
+
+        # Step schedulers on val_mel (the meaningful quality metric)
+        sched_gen.step(val_mel)
+        sched_disc.step(val_mel)
 
         eta_total = (time.time() - train_start) / (epoch - start_epoch) * (args.epochs - epoch)
         logger.info(
-            "Epoch %d/%d — gen=%.4f  val=%.4f  lr_gen=%.2e  epoch_time=%ds  ETA %s",
-            epoch, args.epochs, avg_train, val_loss,
+            "Epoch %d/%d — gen=%.4f  val_mel=%.4f  val_kl=%.2f  val_dur=%.4f  lr_gen=%.2e  epoch_time=%ds  ETA %s",
+            epoch, args.epochs, avg_train, val_mel, val_kl, val_dur,
             optim_gen.param_groups[0]["lr"], int(epoch_time), _fmt_duration(eta_total),
         )
 
         # ── Checkpointing ─────────────────────────────────────────────────────
         if epoch % args.save_every == 0:
             save_checkpoint(epoch, model, mpd, msd, optim_gen, optim_disc,
-                            sched_gen, sched_disc, avg_train, val_loss, output_dir)
+                            sched_gen, sched_disc, avg_train, val_mel, output_dir)
 
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
+        if val_mel < best_val_loss:
+            best_val_loss = val_mel
             best_path = output_dir / "best_model"
             model.save_pretrained(best_path)
             tokenizer.save_pretrained(best_path)
-            logger.info("New best val_loss=%.4f — saved to %s", best_val_loss, best_path)
+            logger.info("New best val_mel=%.4f — saved to %s", best_val_loss, best_path)
 
     # ── Final save ────────────────────────────────────────────────────────────
     final_path = output_dir / "final_model"
