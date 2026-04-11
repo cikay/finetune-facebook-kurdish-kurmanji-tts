@@ -32,7 +32,7 @@ import torch
 import torch.nn.functional as F
 import torchaudio
 from torch.optim import AdamW
-from torch.optim.lr_scheduler import ExponentialLR
+from torch.optim.lr_scheduler import ExponentialLR, LambdaLR, SequentialLR
 from torch.utils.data import DataLoader, Dataset
 from transformers import AutoTokenizer, VitsModel
 
@@ -290,6 +290,7 @@ def train_step(
     batch: dict,
     device: torch.device,
     mel_lambda: float = 45.0,
+    dur_lambda: float = 1.0,
 ) -> dict[str, torch.Tensor]:
     """
     One forward + loss computation step.
@@ -439,7 +440,7 @@ def train_step(
 
     loss_mel = loss_mel_total / B
 
-    total = loss_kl + mel_lambda * loss_mel + loss_dur
+    total = loss_kl + mel_lambda * loss_mel + dur_lambda * loss_dur
 
     return {
         "loss": total,
@@ -569,7 +570,14 @@ def main():
         betas=(0.8, 0.99),
         eps=1e-9,
     )
-    scheduler = ExponentialLR(optimizer, gamma=cfg["lr_decay"])
+    warmup_steps = cfg.get("warmup_steps", 0)
+    if warmup_steps > 0:
+        warmup = LambdaLR(optimizer, lr_lambda=lambda s: min(1.0, s / warmup_steps))
+        decay = ExponentialLR(optimizer, gamma=cfg["lr_decay"])
+        scheduler = SequentialLR(optimizer, schedulers=[warmup, decay], milestones=[warmup_steps])
+        log.info("LR warmup: %d steps, then exponential decay.", warmup_steps)
+    else:
+        scheduler = ExponentialLR(optimizer, gamma=cfg["lr_decay"])
 
     # ── Resume ──
     global_step = 0
@@ -587,7 +595,7 @@ def main():
         for batch_idx, batch in enumerate(loader):
             optimizer.zero_grad()
 
-            losses = train_step(model, batch, device, mel_lambda=cfg["mel_lambda"])
+            losses = train_step(model, batch, device, mel_lambda=cfg["mel_lambda"], dur_lambda=cfg.get("dur_lambda", 1.0))
             loss = losses["loss"]
 
             if torch.isnan(loss) or torch.isinf(loss):
@@ -597,6 +605,8 @@ def main():
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), cfg["grad_clip"])
             optimizer.step()
+            if warmup_steps > 0:
+                scheduler.step()  # step-level for warmup + decay
 
             epoch_loss += loss.item()
             global_step += 1
@@ -616,7 +626,8 @@ def main():
             if global_step % cfg["save_every"] == 0:
                 save_checkpoint(model, optimizer, scheduler, global_step, epoch, output_dir)
 
-        scheduler.step()
+        if warmup_steps == 0:
+            scheduler.step()  # epoch-level for pure exponential decay
         avg = epoch_loss / max(len(loader), 1)
         log.info("-- Epoch %d done  avg_loss=%.4f --", epoch, avg)
 

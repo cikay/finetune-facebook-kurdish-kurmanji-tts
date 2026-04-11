@@ -7,8 +7,10 @@
     "batch_size": 1,
     "lr": 2e-4,
     "lr_decay": 0.999875,
+    "warmup_steps": 500,
     "grad_clip": 1.0,
     "mel_lambda": 45.0,
+    "dur_lambda": 0.1,
 
     "max_text_len": 200,
     "max_audio_secs": 14.5,
@@ -31,8 +33,10 @@
     "batch_size": 1,
     "lr": 2e-4,
     "lr_decay": 0.999875,
+    "warmup_steps": 100,
     "grad_clip": 1.0,
     "mel_lambda": 45.0,
+    "dur_lambda": 0.1,
 
     "max_text_len": 200,
     "max_audio_secs": 14.5,
@@ -55,8 +59,10 @@
     "batch_size": 1,
     "lr": 1e-4,
     "lr_decay": 0.999875,
+    "warmup_steps": 500,
     "grad_clip": 1.0,
     "mel_lambda": 45.0,
+    "dur_lambda": 0.1,
 
     "max_text_len": 200,
     "max_audio_secs": 14.5,
@@ -79,8 +85,10 @@
     "batch_size": 1,
     "lr": 2e-4,
     "lr_decay": 0.9999,
+    "warmup_steps": 1000,
     "grad_clip": 1.0,
     "mel_lambda": 45.0,
+    "dur_lambda": 0.1,
 
     "max_text_len": 200,
     "max_audio_secs": 14.5,
