@@ -32,7 +32,7 @@ import torch
 import torch.nn.functional as F
 import torchaudio
 from torch.optim import AdamW
-from torch.optim.lr_scheduler import ExponentialLR, LambdaLR, SequentialLR
+from torch.optim.lr_scheduler import ExponentialLR
 from torch.utils.data import DataLoader, Dataset
 from transformers import AutoTokenizer, VitsModel
 
@@ -585,21 +585,23 @@ def main():
         betas=(0.8, 0.99),
         eps=1e-9,
     )
+    # Warmup is handled manually via direct LR assignment — no scheduler conflict.
+    # decay_scheduler steps once per epoch after warmup is complete.
     warmup_steps = cfg.get("warmup_steps", 0)
+    base_lr = cfg["lr"]
     if warmup_steps > 0:
-        warmup = LambdaLR(optimizer, lr_lambda=lambda s: min(1.0, s / warmup_steps))
-        decay = ExponentialLR(optimizer, gamma=cfg["lr_decay"])
-        scheduler = SequentialLR(optimizer, schedulers=[warmup, decay], milestones=[warmup_steps])
-        log.info("LR warmup: %d steps, then exponential decay.", warmup_steps)
-    else:
-        scheduler = ExponentialLR(optimizer, gamma=cfg["lr_decay"])
+        # Start at near-zero; warmup loop will ramp up to base_lr
+        for pg in optimizer.param_groups:
+            pg["lr"] = base_lr / warmup_steps
+        log.info("LR warmup: %d steps, then per-epoch exponential decay.", warmup_steps)
+    decay_scheduler = ExponentialLR(optimizer, gamma=cfg["lr_decay"])
 
     # ── Resume ──
     global_step = 0
     start_epoch = 0
     best_loss = float("inf")
     if args.resume is not None:
-        global_step, start_epoch, saved_loss = load_checkpoint(model, optimizer, scheduler, args.resume)
+        global_step, start_epoch, saved_loss = load_checkpoint(model, optimizer, decay_scheduler, args.resume)
         if saved_loss is not None:
             best_loss = saved_loss
         start_epoch += 1
@@ -623,8 +625,11 @@ def main():
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), cfg["grad_clip"])
             optimizer.step()
-            if warmup_steps > 0:
-                scheduler.step()  # step-level for warmup + decay
+            # Linear LR warmup: set LR directly so it doesn't conflict with decay_scheduler
+            if global_step < warmup_steps:
+                warmup_lr = base_lr * (global_step + 1) / warmup_steps
+                for pg in optimizer.param_groups:
+                    pg["lr"] = warmup_lr
 
             epoch_loss += loss.item()
             global_step += 1
@@ -638,20 +643,21 @@ def main():
                     losses["loss_kl"].item(),
                     losses["loss_mel"].item(),
                     losses["loss_dur"].item(),
-                    scheduler.get_last_lr()[0],
+                    optimizer.param_groups[0]["lr"],
                 )
 
-        if warmup_steps == 0:
-            scheduler.step()  # epoch-level for pure exponential decay
+        # Decay once per epoch — only after warmup has fully completed
+        if global_step >= warmup_steps:
+            decay_scheduler.step()
         avg = epoch_loss / max(len(loader), 1)
         log.info("-- Epoch %d done  avg_loss=%.4f --", epoch, avg)
         best_loss = save_checkpoint(
-            model, optimizer, scheduler, global_step, epoch, output_dir,
+            model, optimizer, decay_scheduler, global_step, epoch, output_dir,
             loss=avg, best_loss=best_loss,
         )
 
     # Final checkpoint
-    save_checkpoint(model, optimizer, scheduler, global_step, cfg["epochs"] - 1, output_dir)
+    save_checkpoint(model, optimizer, decay_scheduler, global_step, cfg["epochs"] - 1, output_dir)
 
     # ── Save HF-compatible model for inference ──
     hf_out = output_dir / "hf_model"
