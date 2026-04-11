@@ -62,6 +62,11 @@ MEL_FMAX = 8000.0
 MAX_WAV_SAMPLES = int(15.0 * SAMPLE_RATE)
 MAX_TEXT_TOKENS = 300
 
+# Discriminator segment size: fixed-length crop fed to MPD/MSD (HiFi-GAN standard)
+# 8192 samples ≈ 0.51s at 16kHz — long enough to capture pitch periods, short
+# enough that discriminator gradients are dense and meaningful.
+DISC_SEG_SIZE = 8192
+
 
 # ── Audio utilities ───────────────────────────────────────────────────────────
 
@@ -191,6 +196,26 @@ def collate_fn(batch: list[dict]) -> dict:
         "wav_lengths": torch.tensor(wav_lens, dtype=torch.long),
         "text_lengths": torch.tensor(text_lens, dtype=torch.long),
     }
+
+
+# ── Discriminator utilities ───────────────────────────────────────────────────
+
+
+def random_disc_segment(
+    wav_gen: torch.Tensor, wav_real: torch.Tensor, seg_size: int = DISC_SEG_SIZE
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Randomly crop both waveforms to the same fixed-length segment.
+
+    HiFi-GAN discriminators are designed for short fixed-length inputs.
+    Feeding full waveforms (up to 240k samples) dilutes gradients across time
+    and causes the discriminator to collapse to a constant output.
+    """
+    T = min(wav_gen.shape[2], wav_real.shape[2])
+    if T <= seg_size:
+        pad = seg_size - T
+        return F.pad(wav_gen, (0, pad)), F.pad(wav_real, (0, pad))
+    start = random.randint(0, T - seg_size)
+    return wav_gen[:, :, start:start + seg_size], wav_real[:, :, start:start + seg_size]
 
 
 # ── Discriminators (MPD + MSD) ────────────────────────────────────────────────
@@ -637,28 +662,28 @@ def train(args: SimpleNamespace) -> None:
             waveform_gen  = out["waveform_gen"]
             waveform_real = out["waveform_real"].to(device)
 
-            # Align lengths for discriminator
-            min_len = min(waveform_gen.shape[2], waveform_real.shape[2])
-            wav_gen_cut  = waveform_gen[:, :, :min_len]
-            wav_real_cut = waveform_real[:, :, :min_len]
+            # Crop to fixed segment for discriminator (HiFi-GAN standard approach).
+            # Feeding full waveforms (up to 240k samples) dilutes gradients and
+            # causes discriminator to collapse to a constant output.
+            wav_gen_seg, wav_real_seg = random_disc_segment(waveform_gen, waveform_real)
 
             # ── Discriminator step ────────────────────────────────────────────
             with autocast("cuda", enabled=use_amp):
-                r_mpd, f_mpd, _, _ = mpd(wav_real_cut, wav_gen_cut.detach())
-                r_msd, f_msd, _, _ = msd(wav_real_cut, wav_gen_cut.detach())
+                r_mpd, f_mpd, _, _ = mpd(wav_real_seg, wav_gen_seg.detach())
+                r_msd, f_msd, _, _ = msd(wav_real_seg, wav_gen_seg.detach())
                 loss_disc = discriminator_loss(r_mpd + r_msd, f_mpd + f_msd)
 
             scaler_disc.scale(loss_disc).backward()
             scaler_disc.unscale_(optim_disc)
-            torch.nn.utils.clip_grad_norm_(disc_params, args.grad_clip)
+            disc_grad_norm = torch.nn.utils.clip_grad_norm_(disc_params, args.disc_grad_clip)
             scaler_disc.step(optim_disc)
             scaler_disc.update()
             optim_disc.zero_grad()  # clear disc grads before gen backward
 
             # ── Generator step ────────────────────────────────────────────────
             with autocast("cuda", enabled=use_amp):
-                _, f_mpd, rf_mpd, ff_mpd = mpd(wav_real_cut, wav_gen_cut)
-                _, f_msd, rf_msd, ff_msd = msd(wav_real_cut, wav_gen_cut)
+                _, f_mpd, rf_mpd, ff_mpd = mpd(wav_real_seg, wav_gen_seg)
+                _, f_msd, rf_msd, ff_msd = msd(wav_real_seg, wav_gen_seg)
 
                 loss_adv = generator_adversarial_loss(f_mpd + f_msd)
                 loss_fm  = feature_matching_loss(rf_mpd + rf_msd, ff_mpd + ff_msd)
@@ -699,10 +724,10 @@ def train(args: SimpleNamespace) -> None:
                 eta        = elapsed / steps_done * (len(train_loader) - steps_done)
                 mem        = f"  VRAM={torch.cuda.memory_allocated()/1e9:.1f}GB" if device == "cuda" else ""
                 logger.info(
-                    "  step %d/%d | %s | grad_norm=%.3f | ETA %ds%s",
+                    "  step %d/%d | %s | grad_norm=%.3f  disc_gnorm=%.3f | ETA %ds%s",
                     steps_done, len(train_loader),
                     "  ".join(f"{k}={v:.4f}" for k, v in avg.items()),
-                    grad_norm, int(eta), mem,
+                    grad_norm, disc_grad_norm, int(eta), mem,
                 )
 
         avg_train  = epoch_loss_gen / len(train_loader)
