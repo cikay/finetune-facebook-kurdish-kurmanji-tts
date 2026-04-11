@@ -16,7 +16,9 @@
     "seed": 42,
     "min_align_score": null,
     "min_p808_mos": null,
-    "min_mos_ovr": null
+    "min_mos_ovr": null,
+    "kl_weight_start": 0.01,
+    "kl_warmup_epochs": 20
   },
   "fast": {
     "output_dir": "checkpoints/kmr_fast",
@@ -35,7 +37,9 @@
     "seed": 42,
     "min_align_score": null,
     "min_p808_mos": null,
-    "min_mos_ovr": null
+    "min_mos_ovr": null,
+    "kl_weight_start": 0.01,
+    "kl_warmup_epochs": 20
   },
   "quality": {
     "output_dir": "checkpoints/kmr_quality",
@@ -73,6 +77,8 @@
     "seed": 0,
     "min_align_score": null,
     "min_p808_mos": null,
-    "min_mos_ovr": null
+    "min_mos_ovr": null,
+    "kl_weight_start": 0.01,
+    "kl_warmup_epochs": 20
   }
 }

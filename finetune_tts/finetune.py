@@ -273,6 +273,7 @@ def forward_generator(
     batch: dict,
     device: str,
     mel_transform,
+    kl_weight: float = 1.0,
 ) -> tuple[torch.Tensor, dict]:
     """
     One generator forward pass.
@@ -381,13 +382,14 @@ def forward_generator(
     loss_mel = F.l1_loss(mel_gen[:, :, :min_t], mel_ref[:, :, :min_t])
 
     # ── Total loss ───────────────────────────────────────────────────────────
-    total_loss = loss_mel + loss_kl + loss_dur
+    total_loss = loss_mel + kl_weight * loss_kl + loss_dur
 
     return total_loss, {
         "loss/total": total_loss.item(),
         "loss/mel": loss_mel.item(),
         "loss/kl": loss_kl.item(),
         "loss/dur": loss_dur.item(),
+        "kl_weight": kl_weight,
     }
 
 
@@ -588,6 +590,9 @@ def train(args: SimpleNamespace) -> None:
     best_val_loss = float("inf")
     train_start = time.time()
 
+    kl_warmup_steps = int(args.kl_warmup_epochs * len(train_loader))
+    global_step = start_epoch * len(train_loader)
+
     for epoch in range(start_epoch + 1, args.epochs + 1):
         epoch_start = time.time()
         model.train()
@@ -597,10 +602,17 @@ def train(args: SimpleNamespace) -> None:
         logger.info("── Epoch %d/%d ──────────────────────────────", epoch, args.epochs)
 
         for step, batch in enumerate(train_loader):
+            global_step += 1
+            # KL annealing: linearly ramp from kl_weight_start → 1.0 over kl_warmup_steps
+            if kl_warmup_steps > 0:
+                kl_weight = args.kl_weight_start + (1.0 - args.kl_weight_start) * min(global_step / kl_warmup_steps, 1.0)
+            else:
+                kl_weight = 1.0
+
             optimizer.zero_grad()
 
             with autocast(enabled=(device == "cuda" and args.fp16)):
-                loss, loss_dict = forward_generator(model, batch, device, mel_transform)
+                loss, loss_dict = forward_generator(model, batch, device, mel_transform, kl_weight=kl_weight)
 
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
