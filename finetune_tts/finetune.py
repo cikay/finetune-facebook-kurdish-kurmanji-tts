@@ -662,23 +662,26 @@ def train(args: SimpleNamespace) -> None:
             waveform_gen  = out["waveform_gen"]
             waveform_real = out["waveform_real"].to(device)
 
-            # Crop to fixed segment for discriminator (HiFi-GAN standard approach).
-            # Feeding full waveforms (up to 240k samples) dilutes gradients and
-            # causes discriminator to collapse to a constant output.
+            # ── Discriminator steps (N updates per 1 generator step) ──────────
+            # Generator improves faster than disc can track → disc collapses to
+            # constant output. Multiple disc updates per gen step keep disc ahead.
+            disc_grad_norm = 0.0
+            for _ in range(args.disc_steps):
+                # Fresh random crop each disc update for variety
+                wav_gen_seg, wav_real_seg = random_disc_segment(waveform_gen, waveform_real)
+                with autocast("cuda", enabled=use_amp):
+                    r_mpd, f_mpd, _, _ = mpd(wav_real_seg, wav_gen_seg.detach())
+                    r_msd, f_msd, _, _ = msd(wav_real_seg, wav_gen_seg.detach())
+                    loss_disc = discriminator_loss(r_mpd + r_msd, f_mpd + f_msd)
+                scaler_disc.scale(loss_disc).backward()
+                scaler_disc.unscale_(optim_disc)
+                disc_grad_norm = torch.nn.utils.clip_grad_norm_(disc_params, args.disc_grad_clip)
+                scaler_disc.step(optim_disc)
+                scaler_disc.update()
+                optim_disc.zero_grad()
+
+            # Final crop for generator adversarial step
             wav_gen_seg, wav_real_seg = random_disc_segment(waveform_gen, waveform_real)
-
-            # ── Discriminator step ────────────────────────────────────────────
-            with autocast("cuda", enabled=use_amp):
-                r_mpd, f_mpd, _, _ = mpd(wav_real_seg, wav_gen_seg.detach())
-                r_msd, f_msd, _, _ = msd(wav_real_seg, wav_gen_seg.detach())
-                loss_disc = discriminator_loss(r_mpd + r_msd, f_mpd + f_msd)
-
-            scaler_disc.scale(loss_disc).backward()
-            scaler_disc.unscale_(optim_disc)
-            disc_grad_norm = torch.nn.utils.clip_grad_norm_(disc_params, args.disc_grad_clip)
-            scaler_disc.step(optim_disc)
-            scaler_disc.update()
-            optim_disc.zero_grad()  # clear disc grads before gen backward
 
             # ── Generator step ────────────────────────────────────────────────
             with autocast("cuda", enabled=use_amp):
