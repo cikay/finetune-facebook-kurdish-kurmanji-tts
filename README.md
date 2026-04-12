@@ -32,7 +32,7 @@ Expected output should start with `2.8.0` and CUDA `12.8`.
 Run the end-to-end pipeline:
 
 ```bash
-python -m finetune_tts.dataset_creator
+python -m azadiya_welat_voice_dataset_creator.dataset_creator
 ```
 
 `dataset_creator.py` builds a simple block pipeline with:
@@ -67,9 +67,9 @@ Splits long audio (~5 min each) into short utterances using forced alignment:
 4. Filters segments by duration (2–15s), word count (≥3), and alignment confidence.
 5. Saves segmented WAV files and `segments_metadata.jsonl`.
 
-### Publish Dataset (`push_dataset.py`)
+### Publish Dataset
 ```bash
-python push_dataset.py --repo your-username/your-dataset-name
+python -m azadiya_welat_voice_dataset_creator.push_dataset --repo your-username/your-dataset-name
 ```
 
 Uploads the segmented dataset to HuggingFace Hub.
@@ -85,4 +85,3 @@ test_dataset/
 ├── audio_segments/
 └── segments_metadata.jsonl
 ```
-

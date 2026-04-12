@@ -9,10 +9,10 @@ import pytest
 from pathlib import Path
 import sys
 
-# Add the finetune_tts module to the path
+# Add the azadiya_welat_voice_dataset_creator module to the path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from finetune_tts.segmentation import (
+from azadiya_welat_voice_dataset_creator.segmentation import (
     normalize_text,
     split_into_sentences,
     should_discard,
@@ -64,7 +64,7 @@ class TestNormalizeText:
         "text_decomposed,expected_normalized",
         [
             (
-                "Ez dixwazim bi kurdî biaxivim.", # i + combining ^
+                "Ez dixwazim bi kurdî biaxivim.",  # i + combining ^
                 "Ez dixwazim bi kurdî biaxivim.",
             ),
             (
@@ -184,6 +184,7 @@ class TestSplitIntoSentences:
 
 class TestShouldDiscard:
     """Tests for should_discard function."""
+
     def test_digit_detection(self):
         """Test digit detection."""
         sentence = "Sala 2024 pir zehmet bû"  # Contains digit

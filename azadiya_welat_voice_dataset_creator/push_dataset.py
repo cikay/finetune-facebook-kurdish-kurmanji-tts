@@ -16,7 +16,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from finetune_tts.load_dataset_from_local import load_dataset
+from azadiya_welat_voice_dataset_creator.load_dataset_from_local import load_dataset
 
 load_dotenv()
 
@@ -25,7 +25,9 @@ SAMPLE_RATE = 16000
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Push segmented dataset to HuggingFace Hub")
+    parser = argparse.ArgumentParser(
+        description="Push segmented dataset to HuggingFace Hub"
+    )
     parser.add_argument(
         "--repo",
         type=str,

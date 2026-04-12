@@ -5,9 +5,11 @@ Simple dataset creation pipeline runner.
 
 from pathlib import Path
 
-from finetune_tts.download_data import DownloadYoutubeAudioAndTextBlock
-from finetune_tts.pipeline import PipelineBlock, run_pipeline
-from finetune_tts.segmentation import SegmentationBlock
+from azadiya_welat_voice_dataset_creator.download_data import (
+    DownloadYoutubeAudioAndTextBlock,
+)
+from azadiya_welat_voice_dataset_creator.pipeline import PipelineBlock, run_pipeline
+from azadiya_welat_voice_dataset_creator.segmentation import SegmentationBlock
 
 
 def build_pipeline() -> list[PipelineBlock]:
