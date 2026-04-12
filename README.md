@@ -1,6 +1,4 @@
-# Fine tunning Facebook Kurdish Kurmanji TTS
-
-## Dataset Creation
+# Voice Dataset Creation using Azadiya Welat audio news
 
 A pipeline to build a paired audio-text dataset for Kurdish Kurmanji, suitable for fine-tuning TTS and ASR models.
 
@@ -8,7 +6,7 @@ It downloads news readings from a YouTube playlist, matches them with article te
 
 **Published dataset:** [muzaffercky/azadiya-welat-kurdish-kurmanji-voice](https://huggingface.co/datasets/muzaffercky/azadiya-welat-kurdish-kurmanji-voice)
 
-### Setup
+## Setup
 
 ```bash
 pip install pipenv
@@ -16,7 +14,7 @@ pipenv shell
 pipenv install
 ```
 
-#### RunPod (CUDA Image) Note
+### RunPod (CUDA Image) Note
 
 If you use `runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404`, keep PyTorch aligned with the image stack:
 
@@ -29,7 +27,7 @@ pipenv run python -c "import torch; print(torch.__version__, torch.version.cuda)
 Expected output should start with `2.8.0` and CUDA `12.8`.
 
 
-### Pipeline
+## Pipeline
 
 Run the end-to-end pipeline:
 
@@ -42,7 +40,7 @@ python -m finetune_tts.dataset_creator
 1. `DownloadYoutubeAudioAndTextBlock`
 2. `SegmentationBlock`
 
-#### DownloadYoutubeAudioAndTextBlock
+### DownloadYoutubeAudioAndTextBlock
 
 Downloads paired audio/text data from YouTube and Azadiya Welat:
 
@@ -51,7 +49,7 @@ Downloads paired audio/text data from YouTube and Azadiya Welat:
 3. Matches article text using title slug on `azadyawelat.com`.
 4. Writes `metadata.jsonl` and `playlist_info.json`.
 
-#### SegmentationBlock
+### SegmentationBlock
 
 | Variable | Default | Description |
 |---|---|---|
@@ -69,7 +67,7 @@ Splits long audio (~5 min each) into short utterances using forced alignment:
 4. Filters segments by duration (2–15s), word count (≥3), and alignment confidence.
 5. Saves segmented WAV files and `segments_metadata.jsonl`.
 
-#### Publish Dataset (`push_dataset.py`)
+### Publish Dataset (`push_dataset.py`)
 ```bash
 python push_dataset.py --repo your-username/your-dataset-name
 ```
@@ -87,6 +85,4 @@ test_dataset/
 ├── audio_segments/
 └── segments_metadata.jsonl
 ```
-
-## Fine tunning
 
