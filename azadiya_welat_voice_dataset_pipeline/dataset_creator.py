@@ -5,11 +5,11 @@ Simple dataset creation pipeline runner.
 
 from pathlib import Path
 
-from azadiya_welat_voice_dataset_creator.download_data import (
+from azadiya_welat_voice_dataset_pipeline.download_data import (
     DownloadYoutubeAudioAndTextBlock,
 )
-from azadiya_welat_voice_dataset_creator.pipeline import PipelineBlock, run_pipeline
-from azadiya_welat_voice_dataset_creator.segmentation import SegmentationBlock
+from azadiya_welat_voice_dataset_pipeline.pipeline import PipelineBlock, run_pipeline
+from azadiya_welat_voice_dataset_pipeline.segmentation import SegmentationBlock
 
 
 def build_pipeline() -> list[PipelineBlock]:

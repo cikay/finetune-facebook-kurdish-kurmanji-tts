@@ -9,10 +9,10 @@ import pytest
 from pathlib import Path
 import sys
 
-# Add the azadiya_welat_voice_dataset_creator module to the path
+# Add the azadiya_welat_voice_dataset_pipeline module to the path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from azadiya_welat_voice_dataset_creator.segmentation import (
+from azadiya_welat_voice_dataset_pipeline.segmentation import (
     normalize_text,
     split_into_sentences,
     should_discard,
