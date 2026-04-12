@@ -32,7 +32,7 @@ Expected output should start with `2.8.0` and CUDA `12.8`.
 Run the end-to-end pipeline:
 
 ```bash
-python -m azadiya_welat_voice_dataset_creator.dataset_creator
+python -m azadiya_welat_voice_dataset_pipeline.dataset_creator
 ```
 
 `dataset_creator.py` builds a simple block pipeline with:
@@ -69,7 +69,7 @@ Splits long audio (~5 min each) into short utterances using forced alignment:
 
 ### Publish Dataset
 ```bash
-python -m azadiya_welat_voice_dataset_creator.push_dataset --repo your-username/your-dataset-name
+python -m azadiya_welat_voice_dataset_pipeline.push_dataset --repo your-username/your-dataset-name
 ```
 
 Uploads the segmented dataset to HuggingFace Hub.

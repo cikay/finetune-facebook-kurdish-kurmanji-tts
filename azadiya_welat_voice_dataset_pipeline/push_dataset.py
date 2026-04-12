@@ -16,7 +16,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from azadiya_welat_voice_dataset_creator.load_dataset_from_local import load_dataset
+from azadiya_welat_voice_dataset_pipeline.load_dataset_from_local import load_dataset
 
 load_dotenv()
 
