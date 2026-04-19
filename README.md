@@ -6,6 +6,20 @@ It downloads news readings from a YouTube playlist, matches them with article te
 
 **Published dataset:** [muzaffercky/azadiya-welat-kurdish-kurmanji-voice](https://huggingface.co/datasets/muzaffercky/azadiya-welat-kurdish-kurmanji-voice)
 
+## Clone
+
+Clone the latest code:
+
+```bash
+git clone https://github.com/cikay/azadiya-welat-voice-dataset-pipeline.git
+```
+
+To clone a specific tag (e.g. `v1.0.0`):
+
+```bash
+git clone --branch v1.0.0 --depth 1 https://github.com/cikay/azadiya-welat-voice-dataset-pipeline.git
+```
+
 ## Setup
 
 ```bash
