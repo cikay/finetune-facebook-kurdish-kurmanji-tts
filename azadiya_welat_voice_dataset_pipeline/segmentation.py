@@ -52,7 +52,8 @@ MIN_SCORE = -7.0  # minimum average alignment score (log-prob; more negative = w
 
 # Regex for splitting text into sentences
 # Keeps ending punctuation (.!?) with each sentence
-SENTENCE_SPLIT_REGEX = re.compile(r"[^.!?]*[.!?]+")
+SENTENCE_RE = re.compile(r"[^.!?]*[.!?]+")
+SENTENCE_LIKE_RE = re.compile(r"[^;:]*[;:]+|[^;:]+")
 
 
 def get_alignments_fixed(
@@ -124,7 +125,7 @@ def normalize_text(text: str) -> str:
 
 
 def split_into_sentences(text: str) -> list[str]:
-    return [s.strip() for s in SENTENCE_SPLIT_REGEX.findall(text) if s.strip()]
+    return [s.strip() for s in SENTENCE_RE.findall(text) if s.strip()]
 
 
 # ── Audio quality metrics ────────────────────────────────────────────────────
@@ -195,6 +196,62 @@ def should_discard(
         return True, "digits"
 
     return False, ""
+
+
+def _process_sentence_segment(
+    chunk_text: str,
+    start_sec: float,
+    end_sec: float,
+    align_score: float,
+    audio_data,
+    sr: int,
+    device: str,
+    segments_dir: Path,
+    output_prefix: str,
+    seg_idx: int,
+) -> tuple[list[dict], Counter, int]:
+    """
+    Filter one chunk and, if kept, extract and save its audio.
+
+    Returns (new_segments, discard_counts, updated_seg_idx).
+    """
+    segments_out = []
+    discard_counts: Counter = Counter()
+    duration = end_sec - start_sec
+
+    should_discard_result, reason = should_discard(chunk_text, duration, align_score)
+    if should_discard_result:
+        print(f"    ⚠️  Discarding segment: '{chunk_text}' | Reason: {reason}")
+        discard_counts[reason] += 1
+        return segments_out, discard_counts, seg_idx
+
+    print(
+        f"    ✅ Keeping segment: '{chunk_text}' | Duration: {duration:.1f}s | Align Score: {align_score:.2f}"
+    )
+    start_sample = max(0, int(start_sec * sr))
+    end_sample = min(len(audio_data), int(end_sec * sr))
+    segment_audio = audio_data[start_sample:end_sample]
+
+    if len(segment_audio) < int(MIN_DURATION * sr):
+        return segments_out, discard_counts, seg_idx
+
+    dns_mos_scores = calculate_dns_mos(segment_audio, device)
+
+    seg_filename = f"{output_prefix}_{seg_idx:04d}.wav"
+    seg_path = segments_dir / seg_filename
+    sf.write(seg_path, segment_audio, sr)
+
+    segments_out.append(
+        {
+            "audio": str(seg_path),
+            "text": chunk_text,
+            "duration": round(duration, 2),
+            "align_score": round(align_score, 2),
+            "dns_mos": dns_mos_scores,
+            "word_count": len(chunk_text.split()),
+        }
+    )
+    return segments_out, discard_counts, seg_idx + 1
 
 
 def align_and_segment(
@@ -269,113 +326,94 @@ def align_and_segment(
     audio_data, sr = sf.read(audio_path)
     assert sr == SAMPLE_RATE, f"Expected {SAMPLE_RATE}Hz, got {sr}Hz"
 
-    # Map word timestamps back to sentence boundaries
-    # Build a list of (sentence_text, start_time, end_time, align_score) tuples
-    sentence_segments = _map_words_to_sentences(sentences, full_text, word_timestamps)
+    chunks = _map_words_to_sentence_like_chunks(sentences, word_timestamps)
 
-    # Slice audio for each sentence segment
-
-    for i, (sent_text, start_sec, end_sec, align_score) in enumerate(sentence_segments):
-        duration = end_sec - start_sec
-
-        should_discard_result, reason = should_discard(sent_text, duration, align_score)
-        if should_discard_result:
-            print(f"    ⚠️  Discarding segment: '{sent_text}' | Reason: {reason}")
-            discard_counts[reason] += 1
-            continue
-
-        print(
-            f"    ✅ Keeping segment: '{sent_text}' | Duration: {duration:.1f}s | Align Score: {align_score:.2f}"
+    seg_idx = 0
+    for chunk_text, start_sec, end_sec, align_score in chunks:
+        new_segs, chunk_discards, seg_idx = _process_sentence_segment(
+            chunk_text,
+            start_sec,
+            end_sec,
+            align_score,
+            audio_data,
+            sr,
+            device,
+            segments_dir,
+            output_prefix,
+            seg_idx,
         )
-        # Extract audio segment
-        start_sample = int(start_sec * sr)
-        end_sample = int(end_sec * sr)
-        # Clamp to audio bounds
-        start_sample = max(0, start_sample)
-        end_sample = min(len(audio_data), end_sample)
-        segment_audio = audio_data[start_sample:end_sample]
-
-        if len(segment_audio) < int(MIN_DURATION * sr):
-            continue
-
-        # Calculate DNS MOS for the segment
-        dns_mos_scores = calculate_dns_mos(segment_audio, device)
-
-        # Save segment
-        seg_filename = f"{output_prefix}_{i:04d}.wav"
-        seg_path = segments_dir / seg_filename
-        sf.write(seg_path, segment_audio, sr)
-
-        segments_out.append(
-            {
-                "audio": str(seg_path),
-                "text": sent_text,
-                "duration": round(duration, 2),
-                "align_score": round(align_score, 2),
-                "dns_mos": dns_mos_scores,
-                "word_count": len(sent_text.split()),
-            }
-        )
+        segments_out.extend(new_segs)
+        discard_counts.update(chunk_discards)
 
     return segments_out, dict(discard_counts)
 
 
-def _map_words_to_sentences(
+def _map_words_to_sentence_like_chunks(
     sentences: list[str],
-    full_text: str,
     word_timestamps: list,
 ) -> list[tuple[str, float, float, float]]:
     """
-    Map word-level timestamps back to sentence boundaries.
+    Map word-level timestamps to sentence boundaries, then sub-split any sentence
+    exceeding MAX_DURATION by -, ;, : into smaller chunks.
 
-    Returns: list of (sentence_text, start_sec, end_sec, align_score)
+    Returns: list of (chunk_text, start_sec, end_sec, align_score)
     """
     result = []
-
-    # Build word list from full_text to match alignment output
-    full_words = full_text.split()
     total_aligned_words = len(word_timestamps)
 
     if total_aligned_words == 0:
         return result
 
-    # Track position in the aligned word list
     word_idx = 0
-
     for sentence in sentences:
-        sent_words = sentence.split()
-        n_words = len(sent_words)
+        n_words = len(sentence.split())
 
         if word_idx >= total_aligned_words:
             break
 
-        # Determine word range for this sentence
-        start_word_idx = word_idx
         end_word_idx = min(word_idx + n_words, total_aligned_words)
-
-        # Get the word timestamps for this sentence
-        sent_word_ts = word_timestamps[start_word_idx:end_word_idx]
+        sent_word_ts = word_timestamps[word_idx:end_word_idx]
 
         if not sent_word_ts:
             word_idx = end_word_idx
             continue
 
-        # Extract start/end times and scores
-        # word_timestamps are dicts with 'start', 'end' in seconds, 'score' as log-prob
-        starts = []
-        ends = []
-        scores_list = []
-        for wt in sent_word_ts:
-            starts.append(wt["start"])
-            ends.append(wt["end"])
-            scores_list.append(wt.get("score", 0))
+        starts = [wt["start"] for wt in sent_word_ts]
+        ends = [wt["end"] for wt in sent_word_ts]
+        scores = [wt.get("score", 0) for wt in sent_word_ts]
+        start_sec = min(starts)
+        end_sec = max(ends)
+        align_score = sum(scores) / len(scores)
+        duration = end_sec - start_sec
 
-        if starts and ends:
-            start_sec = min(starts)  # already in seconds
-            end_sec = max(ends)
-            align_score = sum(scores_list) / len(scores_list) if scores_list else 0
+        if duration <= MAX_DURATION:
             result.append((sentence, start_sec, end_sec, align_score))
+            word_idx = end_word_idx
+            continue
 
+        sub_chunks = [c.strip() for c in SENTENCE_LIKE_RE.findall(sentence) if c.strip()]
+        if len(sub_chunks) <= 1:
+            # this will be discarded in _process_sentence_segment
+            result.append((sentence, start_sec, end_sec, align_score))
+            word_idx = end_word_idx
+            continue
+
+        sub_word_idx = 0
+        for chunk in sub_chunks:
+            chunk_n_words = len(chunk.split())
+            chunk_end = min(sub_word_idx + chunk_n_words, len(sent_word_ts))
+            chunk_wts = sent_word_ts[sub_word_idx:chunk_end]
+            if chunk_wts:
+                chunk_scores = [wt.get("score", 0) for wt in chunk_wts]
+                result.append(
+                    (
+                        chunk,
+                        min(wt["start"] for wt in chunk_wts),
+                        max(wt["end"] for wt in chunk_wts),
+                        sum(chunk_scores) / len(chunk_scores),
+                    )
+                )
+            sub_word_idx = chunk_end
         word_idx = end_word_idx
 
     return result
