@@ -49,6 +49,7 @@ MIN_DURATION = 2.0  # seconds
 MAX_DURATION = 15.0  # seconds
 MIN_WORDS = 3  # minimum words per segment
 MIN_SCORE = -7.0  # minimum average alignment score (log-prob; more negative = worse)
+END_PADDING = 0.15  # seconds of silence padding added after each segment end
 
 # Regex for splitting text into sentences
 # Keeps ending punctuation (.!?) with each sentence
@@ -229,7 +230,7 @@ def _process_sentence_segment(
         f"    ✅ Keeping segment: '{chunk_text}' | Duration: {duration:.1f}s | Align Score: {align_score:.2f}"
     )
     start_sample = max(0, int(start_sec * sr))
-    end_sample = min(len(audio_data), int(end_sec * sr))
+    end_sample = min(len(audio_data), int((end_sec + END_PADDING) * sr))
     segment_audio = audio_data[start_sample:end_sample]
 
     if len(segment_audio) < int(MIN_DURATION * sr):
