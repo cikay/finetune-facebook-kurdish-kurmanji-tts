@@ -1,15 +1,3 @@
-#!/usr/bin/env python3
-"""
-Preprocess long Kurdish Kurmanji audio into short utterance-level segments
-using CTC forced alignment with the MMS model.
-
-Unlike the Whisper-based approach, this aligns the *ground truth* text to the
-audio, producing accurate timestamps without ASR errors.
-
-Usage:
-   python segmentation.py --audio-subdir audio
-"""
-
 from collections import Counter
 import json
 import re
@@ -20,7 +8,6 @@ from typing import Union
 
 import soundfile as sf
 import torch
-
 import numpy as np
 from ctc_forced_aligner import (
     load_audio,
@@ -36,35 +23,11 @@ from ctc_forced_aligner.alignment_utils import (
 )
 from torchmetrics.functional.audio import deep_noise_suppression_mean_opinion_score
 
-# ── Config ───────────────────────────────────────────────────────────────────
-LANGUAGE = "kmr"  # ISO 639-3 for Kurmanji Kurdish
 SAMPLE_RATE = 16000
 
-# Alignment params
-BATCH_SIZE = 16  # batch size for emission generation
-WINDOW_SIZE = 30  # seconds per alignment window
-CONTEXT_SIZE = 2  # seconds of overlap between windows
-
-# Segment filtering
-MIN_DURATION = 2.0  # seconds
-MAX_DURATION = 15.0  # seconds
-MIN_WORDS = 3  # minimum words per segment
-MIN_SCORE = -7.0  # minimum average alignment score (log-prob; more negative = worse)
-END_PADDING = 0.15  # seconds of silence padding added after each segment end
-
-# Regex for splitting text into sentences
-# Keeps ending punctuation (.!?) with each sentence
 SENTENCE_RE = re.compile(r"[^.!?]*[.!?]+")
 SENTENCE_LIKE_RE = re.compile(r"[^;:]*[;:]+|[^;:]+")
 
-# ── Text utilities ───────────────────────────────────────────────────────────
-
-# Abbreviation / initialism patterns
-# - Matches dotted initialisms like "D.Y.A." or "A.B.D."
-# - Matches short title-style abbreviations like "Dr.", "Mr.", "Prof."
-# - Matches all-caps initialisms like "DYA", "PDK", "UNESCO"
-# - Uses a lookahead on the dotted branch to avoid matching normal sentence-final
-#   punctuation like "Ahmed."
 ABBR_RE = re.compile(
     r"(?:"
     r"\b(?:(?:[A-ZÇĞÎÛŞ]\.){2,}|[A-ZÇĞÎÛŞ][a-zçğıîûş]{1,3}\.)(?=\s*[A-Za-zÇĞÎÛŞçğıîûş])"
@@ -76,7 +39,6 @@ DIGIT_RE = re.compile(r"\d")
 
 
 def normalize_text(text: str) -> str:
-    """Normalize whitespace and light cleanup for Kurdish Kurmanji text."""
     text = unicodedata.normalize("NFC", text)
     text = text.strip()
     text = re.sub(r"\s+", " ", text)
@@ -87,24 +49,28 @@ def split_into_sentences(text: str) -> list[str]:
     return [s.strip() for s in SENTENCE_RE.findall(text) if s.strip()]
 
 
-class SegmentationBlock:
-    name: str = "segmentation"
+class SegmentationStage:
+    name = "segmentation"
 
-    def __init__(
-        self, input_dirs: dict[str, Path], output_dirs: dict[str, Path]
-    ) -> None:
-        self.name = "segmentation"
-        self.input_dirs = input_dirs
-        self.output_dirs = output_dirs
+    def __init__(self, config: dict) -> None:
+        self.input_dir = Path(config["input_dir"])
+        self.output_dir = Path(config["output_dir"])
+        self.language = config.get("align_language", "kmr")
+        self.min_duration = float(config.get("min_duration", 2.0))
+        self.max_duration = float(config.get("max_duration", 15.0))
+        self.min_words = int(config.get("min_words", 3))
+        self.min_align_score = float(config.get("min_align_score", -7.0))
+        self.end_padding = float(config.get("end_padding", 0.15))
+        self.batch_size = int(config.get("batch_size", 16))
+        self.window_size = int(config.get("window_size", 30))
+        self.context_size = int(config.get("context_size", 2))
 
     def run(self) -> None:
-        self._validate_keys()
-
-        audio_dir = Path(self.input_dirs["audio"]).expanduser()
-        text_dir = Path(self.input_dirs["text"]).expanduser()
-        meta_file = Path(self.input_dirs["metadata"]).expanduser()
-        segments_dir = Path(self.output_dirs["audio_segments"]).expanduser()
-        segments_meta_file = Path(self.output_dirs["metadata"]).expanduser()
+        audio_dir = self.input_dir / "audio"
+        text_dir = self.input_dir / "text"
+        meta_file = self.input_dir / "metadata.jsonl"
+        segments_dir = self.output_dir / "audio_segments"
+        segments_meta_file = self.output_dir / "metadata.jsonl"
 
         self._validate_paths(audio_dir, text_dir, meta_file)
 
@@ -119,26 +85,18 @@ class SegmentationBlock:
         alignment_model, alignment_tokenizer = self._load_alignment_model(device, dtype)
 
         all_segments, total_discard_counts = self._segment_entries(
-            entries, alignment_model, alignment_tokenizer,
-            audio_dir, text_dir, segments_dir, device, dtype,
+            entries,
+            alignment_model,
+            alignment_tokenizer,
+            audio_dir,
+            text_dir,
+            segments_dir,
+            device,
+            dtype,
         )
 
         self._print_run_stats(all_segments, total_discard_counts)
         self._save_segments_metadata(all_segments, segments_meta_file)
-
-    def _validate_keys(self) -> None:
-        required_inputs = {"audio", "text", "metadata"}
-        required_outputs = {"audio_segments", "metadata"}
-        missing_inputs = required_inputs - set(self.input_dirs)
-        missing_outputs = required_outputs - set(self.output_dirs)
-        if missing_inputs:
-            raise ValueError(
-                f"Missing segmentation input_dirs keys: {sorted(missing_inputs)}"
-            )
-        if missing_outputs:
-            raise ValueError(
-                f"Missing segmentation output_dirs keys: {sorted(missing_outputs)}"
-            )
 
     def _validate_paths(self, audio_dir: Path, text_dir: Path, meta_file: Path) -> None:
         if not audio_dir.exists() or not audio_dir.is_dir():
@@ -206,8 +164,14 @@ class SegmentationBlock:
 
             try:
                 segments, discard_counts = self._segment_entry(
-                    alignment_model, alignment_tokenizer,
-                    audio_path, text, video_id, segments_dir, device, dtype,
+                    alignment_model,
+                    alignment_tokenizer,
+                    audio_path,
+                    text,
+                    video_id,
+                    segments_dir,
+                    device,
+                    dtype,
                 )
                 all_segments.extend(segments)
                 total_discard_counts.update(discard_counts)
@@ -221,34 +185,6 @@ class SegmentationBlock:
         with open(text_path, "r", encoding="utf-8") as f:
             text = normalize_text(f.read())
         return text if text and len(text) >= 20 else None
-
-    def _print_run_stats(self, all_segments: list[dict], discard_counts: Counter) -> None:
-        if not all_segments:
-            print("⚠️  No segments produced. Exiting.")
-            sys.exit(1)
-
-        print(f"\n✅ Total segments: {len(all_segments)}")
-        total_discarded = sum(discard_counts.values())
-        print(f"🗑️  Total discarded: {total_discarded}")
-        if discard_counts:
-            print("🧾 Discard reasons:")
-            for reason, count in sorted(discard_counts.items()):
-                print(f"   - {reason}: {count}")
-
-        total_dur = sum(s["duration"] for s in all_segments)
-        avg_dur = total_dur / len(all_segments)
-        avg_score = sum(s["align_score"] for s in all_segments) / len(all_segments)
-        avg_words = sum(s["word_count"] for s in all_segments) / len(all_segments)
-        print(
-            f"📊 Total duration: {total_dur / 3600:.1f}h | Avg duration: {avg_dur:.1f}s"
-            f" | Avg Align score: {avg_score:.2f} | Avg word count: {avg_words:.1f}"
-        )
-
-    def _save_segments_metadata(self, all_segments: list[dict], path: Path) -> None:
-        with open(path, "w", encoding="utf-8") as f:
-            for seg in all_segments:
-                f.write(json.dumps(seg, ensure_ascii=False) + "\n")
-        print("✅ Preprocessing complete!")
 
     def _segment_entry(
         self,
@@ -265,10 +201,11 @@ class SegmentationBlock:
 
         audio_waveform = load_audio(str(audio_path), dtype, device)
         emissions, stride = generate_emissions(
-            alignment_model, audio_waveform,
-            window_length=WINDOW_SIZE,
-            context_length=CONTEXT_SIZE,
-            batch_size=BATCH_SIZE,
+            alignment_model,
+            audio_waveform,
+            window_length=self.window_size,
+            context_length=self.context_size,
+            batch_size=self.batch_size,
         )
 
         sentences, tokens_starred, text_starred = self._prepare_text(text)
@@ -292,12 +229,19 @@ class SegmentationBlock:
         seg_idx = 0
         for chunk_text, start_sec, end_sec, align_score in chunks:
             new_seg, chunk_discards, seg_idx = self._build_segment(
-                chunk_text, start_sec, end_sec, align_score,
-                audio_data, sr, device, segments_dir, output_prefix, seg_idx,
+                chunk_text,
+                start_sec,
+                end_sec,
+                align_score,
+                audio_data,
+                sr,
+                device,
+                segments_dir,
+                output_prefix,
+                seg_idx,
             )
             if new_seg:
                 segments_out.append(new_seg)
-
             discard_counts.update(chunk_discards)
 
         return segments_out, dict(discard_counts)
@@ -309,7 +253,7 @@ class SegmentationBlock:
         print(f"    Text split into {len(sentences)} sentences")
         full_text = " ".join(sentences)
         tokens_starred, text_starred = preprocess_text(
-            full_text, romanize=True, language=LANGUAGE
+            full_text, romanize=True, language=self.language
         )
         return sentences, tokens_starred, text_starred
 
@@ -327,24 +271,18 @@ class SegmentationBlock:
         spans = get_spans(tokens_starred, segments, blank_token)
         return postprocess_results(text_starred, spans, stride, scores)
 
-    def _get_alignments_fixed(
-        self,
-        emissions: torch.Tensor,
-        tokens: list,
-        tokenizer,
-    ):
+    def _get_alignments_fixed(self, emissions: torch.Tensor, tokens: list, tokenizer):
         """
         Like ctc_forced_aligner.get_alignments but fixes the <star> token index.
 
-        The HuggingFace tokenizer has extra special tokens (<pad>, </s>, <unk>)
-        that inflate the vocab size. generate_emissions adds the star column at
-        the last emissions index, so <star> must map there, not to len(vocab).
+        The HuggingFace tokenizer has extra special tokens that inflate the vocab
+        size. generate_emissions adds the star column at the last emissions index,
+        so <star> must map there, not to len(vocab).
         """
         assert len(tokens) > 0, "Empty transcript"
 
         dictionary = tokenizer.get_vocab()
         dictionary = {k.lower(): v for k, v in dictionary.items()}
-        # Fix: star index = last column of emissions (added by generate_emissions)
         dictionary["<star>"] = emissions.shape[-1] - 1
 
         token_indices = [
@@ -376,7 +314,9 @@ class SegmentationBlock:
     def _sub_split_sentence(
         self, sentence: str, sent_word_ts: list
     ) -> list[tuple[str, float, float, float]]:
-        sub_chunks = [c.strip() for c in SENTENCE_LIKE_RE.findall(sentence) if c.strip()]
+        sub_chunks = [
+            c.strip() for c in SENTENCE_LIKE_RE.findall(sentence) if c.strip()
+        ]
         if len(sub_chunks) <= 1:
             return []
 
@@ -416,13 +356,17 @@ class SegmentationBlock:
 
             start_sec, end_sec, align_score = self._sentence_time_span(sent_word_ts)
 
-            if end_sec - start_sec <= MAX_DURATION:
+            if end_sec - start_sec <= self.max_duration:
                 result.append((sentence, start_sec, end_sec, align_score))
                 word_idx = end_word_idx
                 continue
 
             sub_chunks = self._sub_split_sentence(sentence, sent_word_ts)
-            result.extend(sub_chunks if sub_chunks else [(sentence, start_sec, end_sec, align_score)])
+            result.extend(
+                sub_chunks
+                if sub_chunks
+                else [(sentence, start_sec, end_sec, align_score)]
+            )
             word_idx = end_word_idx
 
         return result
@@ -430,11 +374,11 @@ class SegmentationBlock:
     def _should_discard(
         self, sentence: str, duration: float, align_score: float
     ) -> tuple[bool, str]:
-        if duration < MIN_DURATION or duration > MAX_DURATION:
+        if duration < self.min_duration or duration > self.max_duration:
             return True, "duration"
-        elif len(sentence.split()) < MIN_WORDS:
+        elif len(sentence.split()) < self.min_words:
             return True, "too_few_words"
-        elif align_score < MIN_SCORE:
+        elif align_score < self.min_align_score:
             return True, "low_score"
         elif bool(ABBR_RE.search(sentence)):
             return True, "abbreviations"
@@ -446,15 +390,18 @@ class SegmentationBlock:
         self, audio_data, sr: int, start_sec: float, end_sec: float
     ) -> np.ndarray:
         start_sample = max(0, int(start_sec * sr))
-        end_sample = min(len(audio_data), int((end_sec + END_PADDING) * sr))
+        end_sample = min(len(audio_data), int((end_sec + self.end_padding) * sr))
         return audio_data[start_sample:end_sample]
 
-    def _calculate_dns_mos(self, waveform: np.ndarray, device: str = "cpu") -> dict[str, float]:
+    def _calculate_dns_mos(self, waveform: np.ndarray, device: str) -> dict[str, float]:
         if isinstance(waveform, np.ndarray):
             waveform = torch.from_numpy(waveform).float()
         waveform = waveform.to(device)
         dns_scores = deep_noise_suppression_mean_opinion_score(
-            preds=waveform, fs=SAMPLE_RATE, personalized=False, device=device,
+            preds=waveform,
+            fs=SAMPLE_RATE,
+            personalized=False,
+            device=device,
         )
         return {
             "p808_mos": round(float(dns_scores[0]), 2),
@@ -479,7 +426,9 @@ class SegmentationBlock:
         discard_counts: Counter = Counter()
         duration = end_sec - start_sec
 
-        should_discard_result, reason = self._should_discard(chunk_text, duration, align_score)
+        should_discard_result, reason = self._should_discard(
+            chunk_text, duration, align_score
+        )
         if should_discard_result:
             print(f"    ⚠️  Discarding segment: '{chunk_text}' | Reason: {reason}")
             discard_counts[reason] += 1
@@ -490,7 +439,7 @@ class SegmentationBlock:
         )
 
         segment_audio = self._extract_audio_slice(audio_data, sr, start_sec, end_sec)
-        if len(segment_audio) < int(MIN_DURATION * sr):
+        if len(segment_audio) < int(self.min_duration * sr):
             return None, discard_counts, seg_idx
 
         dns_mos_scores = self._calculate_dns_mos(segment_audio, device)
@@ -507,3 +456,33 @@ class SegmentationBlock:
             "word_count": len(chunk_text.split()),
         }
         return segment, discard_counts, seg_idx + 1
+
+    def _print_run_stats(
+        self, all_segments: list[dict], discard_counts: Counter
+    ) -> None:
+        if not all_segments:
+            print("⚠️  No segments produced. Exiting.")
+            sys.exit(1)
+
+        print(f"\n✅ Total segments: {len(all_segments)}")
+        total_discarded = sum(discard_counts.values())
+        print(f"🗑️  Total discarded: {total_discarded}")
+        if discard_counts:
+            print("🧾 Discard reasons:")
+            for reason, count in sorted(discard_counts.items()):
+                print(f"   - {reason}: {count}")
+
+        total_dur = sum(s["duration"] for s in all_segments)
+        avg_dur = total_dur / len(all_segments)
+        avg_score = sum(s["align_score"] for s in all_segments) / len(all_segments)
+        avg_words = sum(s["word_count"] for s in all_segments) / len(all_segments)
+        print(
+            f"📊 Total duration: {total_dur / 3600:.1f}h | Avg duration: {avg_dur:.1f}s"
+            f" | Avg Align score: {avg_score:.2f} | Avg word count: {avg_words:.1f}"
+        )
+
+    def _save_segments_metadata(self, all_segments: list[dict], path: Path) -> None:
+        with open(path, "w", encoding="utf-8") as f:
+            for seg in all_segments:
+                f.write(json.dumps(seg, ensure_ascii=False) + "\n")
+        print("✅ Segmentation complete!")

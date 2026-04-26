@@ -1,0 +1,27 @@
+stages:
+  - acquire
+  - segmentation
+
+acquire:
+  sources:
+    - audio:
+        strategy: youtube_playlist
+        playlist_urls:
+          - https://youtube.com/playlist?list=PLpi8IQW8sLlOmmCgJA00ecGLHYMBcS5bu&si=dKWr1h_BJWV_FTTx
+      text:
+        strategy: web_scrape
+        base_url: https://azadyawelat.com/
+        endpoint_method: slugify-audio-name
+  langid_language: kmr_Latn
+  min_lang_confidence: 0.60
+  output_dir: dataset/acquire
+
+segmentation:
+  input_dir: dataset/acquire
+  output_dir: dataset/segments
+  align_language: kmr
+  min_duration: 2.0
+  max_duration: 15.0
+  min_words: 3
+  min_align_score: -7.0
+  end_padding: 0.15

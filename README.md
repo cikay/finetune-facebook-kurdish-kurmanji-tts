@@ -40,48 +40,52 @@ pipenv run python -c "import torch; print(torch.__version__, torch.version.cuda)
 
 Expected output should start with `2.8.0` and CUDA `12.8`.
 
-
 ## Pipeline
 
-Run the end-to-end pipeline:
+The pipeline is configured via `configs/config.yml`. Run it with:
 
 ```bash
-python -m azadiya_welat_voice_dataset_pipeline.dataset_creator
+python -m azadiya_welat_voice_dataset_pipeline.pipeline --config configs/config.yml
 ```
 
-`dataset_creator.py` builds a simple block pipeline with:
+Stages run in the order defined under the `stages` key in `configs/config.yml`.
 
-1. `DownloadYoutubeAudioAndTextBlock`
-2. `SegmentationBlock`
-
-### DownloadYoutubeAudioAndTextBlock
+### AcquireStage
 
 Downloads paired audio/text data from YouTube and Azadiya Welat:
 
 1. Fetches playlist metadata with `yt-dlp`.
 2. Downloads each video's audio as 16kHz mono WAV.
-3. Matches article text using title slug on `azadyawelat.com`.
-4. Writes `metadata.jsonl` and `playlist_info.json`.
+3. Matches article text using the title slug on `azadyawelat.com`.
+4. Filters by language using fastText (`langid_language`).
+5. Writes `metadata.jsonl` and `playlist_info.json` to `output_dir`.
 
-### SegmentationBlock
+Configured under `acquire` in `configs/config.yml`. Supports pluggable strategies:
 
-| Variable | Default | Description |
+- **audio strategies:** `youtube_playlist`
+- **text strategies:** `web_scrape`
+
+### SegmentationStage
+
+| Key | Default | Description |
 |---|---|---|
-| `MIN_DURATION` | `2.0` | Minimum segment duration (seconds) |
-| `MAX_DURATION` | `15.0` | Maximum segment duration (seconds) |
-| `MIN_WORDS` | `3` | Minimum words per segment |
-| `MIN_SCORE` | `-7.0` | Minimum alignment confidence score |
+| `min_duration` | `2.0` | Minimum segment duration (seconds) |
+| `max_duration` | `15.0` | Maximum segment duration (seconds) |
+| `min_words` | `3` | Minimum words per segment |
+| `min_align_score` | `-7.0` | Minimum alignment confidence score |
+| `end_padding` | `0.15` | Silence padding after each segment end (seconds) |
 
-
-Splits long audio (~5 min each) into short utterances using forced alignment:
+Splits long audio (~5 min each) into short utterances using CTC forced alignment:
 
 1. Loads the [MMS-300M forced alignment model](https://huggingface.co/MahmoudAshraf/mms-300m-1130-forced-aligner) (supports 1,130+ languages including Kurdish).
-2. Aligns ground truth text to audio using CTC forced alignment — no ASR transcription involved.
+2. Aligns ground truth text to audio — no ASR transcription involved.
 3. Maps word-level timestamps back to sentence boundaries.
-4. Filters segments by duration (2–15s), word count (≥3), and alignment confidence.
-5. Saves segmented WAV files and `segments_metadata.jsonl`.
+4. Sub-splits sentences longer than `max_duration` by `;:` punctuation.
+5. Filters segments by duration, word count, and alignment confidence.
+6. Saves segmented WAV files and `metadata.jsonl` to `output_dir`.
 
 ### Publish Dataset
+
 ```bash
 python -m azadiya_welat_voice_dataset_pipeline.push_dataset --repo your-username/your-dataset-name
 ```
@@ -91,11 +95,13 @@ Uploads the segmented dataset to HuggingFace Hub.
 ### Output Structure
 
 ```text
-test_dataset/
-├── audio/
-├── text/
-├── metadata.jsonl
-├── playlist_info.json
-├── audio_segments/
-└── segments_metadata.jsonl
+dataset/
+├── acquire/
+│   ├── audio/
+│   ├── text/
+│   ├── metadata.jsonl
+│   └── playlist_info.json
+└── segments/
+    ├── audio_segments/
+    └── metadata.jsonl
 ```
