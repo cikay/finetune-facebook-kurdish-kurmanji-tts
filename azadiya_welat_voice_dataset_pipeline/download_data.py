@@ -211,17 +211,6 @@ def scrape_article(url: str) -> dict | None:
         return None
 
 
-def build_full_text(article: dict) -> str:
-    """Build the full text matching audio reading order: title, author, text."""
-    parts = []
-    if article["title"]:
-        parts.append(article["title"])
-    if article["author"]:
-        parts.append(article["author"])
-    parts.append(article["text"])
-    return "\n".join(parts)
-
-
 def run_download_data(
     input_dirs: dict[str, Path],
     output_dirs: dict[str, Path],
@@ -299,16 +288,14 @@ def run_download_data(
             fail_count += 1
             continue
 
-        # Build full text: title + author + text (matches audio reading order)
-        full_text = build_full_text(article)
-
         # Save text
         text_filename = f"{video_id}.txt"
         text_path = text_dir / text_filename
         with open(text_path, "w", encoding="utf-8") as f:
-            f.write(full_text)
+            f.write(article["text"])
 
-        print(f"  ✅ Audio: {audio_filename} | Text: {len(full_text)} chars")
+        text_len = len(article["text"])
+        print(f"  ✅ Audio: {audio_filename} | Text: {text_len} chars")
         print(f"     Title: {article['title']}")
         print(f"     Author: {article['author']}")
 
@@ -320,7 +307,7 @@ def run_download_data(
                 "slug": slug,
                 "audio_file": f"audio/{audio_filename}",
                 "text_file": f"text/{text_filename}",
-                "text_length": len(full_text),
+                "text_length": text_len,
                 "article_url": article_url,
             }
         )
