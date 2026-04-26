@@ -38,8 +38,9 @@ class YoutubePlaylistAudioStrategy:
             "quiet": True,
             "no_warnings": True,
             "skip_download": True,
-            "extract_flat": "in_playlist",
+            "extract_flat": True,
             "noplaylist": False,
+            "ignoreerrors": True,
             "cachedir": False,
         }
         if self.cookies_file and self.cookies_file.exists():
