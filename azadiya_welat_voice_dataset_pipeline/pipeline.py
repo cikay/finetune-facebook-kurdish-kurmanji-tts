@@ -3,11 +3,13 @@ from pathlib import Path
 import yaml
 
 from .acquire.stage import AcquireStage
+from .enhancement.stage import EnhancementStage
 from .segmentation.stage import SegmentationStage
 from .stage import PipelineStage
 
 STAGE_REGISTRY: dict[str, type[PipelineStage]] = {
     "acquire": AcquireStage,
+    "enhancement": EnhancementStage,
     "segmentation": SegmentationStage,
 }
 
